@@ -2,7 +2,7 @@
   "name": "xaml-python-intellisense",
   "displayName": "XAML Python IntelliSense",
   "description": "Provides IntelliSense/autocomplete for WPF XAML elements in Python code (pyRevit/IronPython)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "dolanklock",
   "repository": {
     "type": "git",
@@ -38,6 +38,10 @@
       {
         "command": "xaml-intellisense.generateStubsForFile",
         "title": "XAML: Generate Stub for Current File"
+      },
+      {
+        "command": "xaml-intellisense.configureSettings",
+        "title": "XAML: Configure VS Code Settings"
       }
     ],
     "configuration": {
@@ -62,6 +66,16 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically inject TYPE_CHECKING imports and class annotations into Python files"
+        },
+        "xamlPythonIntellisense.stubsFolder": {
+          "type": "string",
+          "default": "typings",
+          "description": "Folder name for generated stub files (relative to workspace root)"
+        },
+        "xamlPythonIntellisense.autoConfigureSettings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically configure VS Code Python settings for stub path"
         }
       }
     }
