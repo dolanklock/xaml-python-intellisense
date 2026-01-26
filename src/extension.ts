@@ -359,74 +359,19 @@ def setup_element_groups(window):
                 forms.WPFWindow.__init__(self, 'MainWindow.xaml')
                 setup_element_groups(self)
     """
-    # Import WPF types
-    try:
-        from System.Windows.Controls import (
-            Button, TextBox, ComboBox, CheckBox, RadioButton,
-            ListView, ListBox, DataGrid, TextBlock, Label,
-            ProgressBar, Slider, TabControl, TabItem, Image,
-            Menu, MenuItem, TreeView, TreeViewItem, ToolBar,
-            StatusBar, Expander, GroupBox, ScrollViewer,
-            PasswordBox, RichTextBox, DatePicker, Calendar,
-            Grid, StackPanel, WrapPanel, DockPanel, Canvas, Border
-        )
-
-        type_map = {
-            Button: 'Button',
-            TextBox: 'TextBox',
-            ComboBox: 'ComboBox',
-            CheckBox: 'CheckBox',
-            RadioButton: 'RadioButton',
-            ListView: 'ListView',
-            ListBox: 'ListBox',
-            DataGrid: 'DataGrid',
-            TextBlock: 'TextBlock',
-            Label: 'Label',
-            ProgressBar: 'ProgressBar',
-            Slider: 'Slider',
-            TabControl: 'TabControl',
-            TabItem: 'TabItem',
-            Image: 'Image',
-            Menu: 'Menu',
-            MenuItem: 'MenuItem',
-            TreeView: 'TreeView',
-            TreeViewItem: 'TreeViewItem',
-            ToolBar: 'ToolBar',
-            StatusBar: 'StatusBar',
-            Expander: 'Expander',
-            GroupBox: 'GroupBox',
-            ScrollViewer: 'ScrollViewer',
-            PasswordBox: 'PasswordBox',
-            RichTextBox: 'RichTextBox',
-            DatePicker: 'DatePicker',
-            Calendar: 'Calendar',
-            Grid: 'Grid',
-            StackPanel: 'StackPanel',
-            WrapPanel: 'WrapPanel',
-            DockPanel: 'DockPanel',
-            Canvas: 'Canvas',
-            Border: 'Border',
-        }
-    except ImportError:
-        # Fallback for environments where not all types are available
-        from System.Windows.Controls import (
-            Button, TextBox, ComboBox, CheckBox,
-            ListView, ListBox, Label, ProgressBar
-        )
-
-        type_map = {
-            Button: 'Button',
-            TextBox: 'TextBox',
-            ComboBox: 'ComboBox',
-            CheckBox: 'CheckBox',
-            ListView: 'ListView',
-            ListBox: 'ListBox',
-            Label: 'Label',
-            ProgressBar: 'ProgressBar',
-        }
+    # Build a set of type names for matching (more reliable than isinstance in IronPython)
+    type_names = {
+        'Button', 'TextBox', 'ComboBox', 'CheckBox', 'RadioButton',
+        'ListView', 'ListBox', 'DataGrid', 'TextBlock', 'Label',
+        'ProgressBar', 'Slider', 'TabControl', 'TabItem', 'Image',
+        'Menu', 'MenuItem', 'TreeView', 'TreeViewItem', 'ToolBar',
+        'StatusBar', 'Expander', 'GroupBox', 'ScrollViewer',
+        'PasswordBox', 'RichTextBox', 'DatePicker', 'Calendar',
+        'Grid', 'StackPanel', 'WrapPanel', 'DockPanel', 'Canvas', 'Border',
+    }
 
     # Initialize groups dictionary
-    groups = {name: [] for name in type_map.values()}
+    groups = {name: [] for name in type_names}
 
     # Find all named elements and group by type
     for attr_name in dir(window):
@@ -435,10 +380,10 @@ def setup_element_groups(window):
 
         try:
             element = getattr(window, attr_name)
-            for wpf_type, group_name in type_map.items():
-                if isinstance(element, wpf_type):
-                    groups[group_name].append(attr_name)
-                    break
+            # Use type name matching instead of isinstance (more reliable in IronPython)
+            type_name = type(element).__name__
+            if type_name in type_names:
+                groups[type_name].append(attr_name)
         except (AttributeError, TypeError):
             # Skip attributes that can't be accessed
             pass
