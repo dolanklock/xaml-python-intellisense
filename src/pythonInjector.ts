@@ -31,8 +31,8 @@ export function injectTypeAnnotations(
   // Check if our XAML base import already exists
   const hasXamlBaseImport = content.includes('_XAMLBase') || content.includes(stubClassName);
 
-  // Check if TYPE_CHECKING import exists
-  const hasTypeChecking = content.includes('TYPE_CHECKING');
+  // Check if TYPE_CHECKING import exists (either direct import or try/except pattern)
+  const hasTypeChecking = content.includes('TYPE_CHECKING') || content.includes('TYPE_CHECKING = False');
 
   if (hasXamlBaseImport) {
     // Already set up, nothing to do
@@ -47,14 +47,22 @@ export function injectTypeAnnotations(
     return false;
   }
 
-  // Add TYPE_CHECKING import if needed
+  // Add TYPE_CHECKING import if needed (IronPython compatible)
   if (!hasTypeChecking) {
     // Find the imports section
     const lastImportMatch = content.match(/^(import .+|from .+ import .+)$/gm);
     if (lastImportMatch) {
       const lastImport = lastImportMatch[lastImportMatch.length - 1];
       const insertPos = content.indexOf(lastImport) + lastImport.length;
-      content = content.slice(0, insertPos) + '\nfrom typing import TYPE_CHECKING' + content.slice(insertPos);
+      // Use try/except for IronPython compatibility
+      const typeCheckingImport = `
+
+# IronPython doesn't have typing module, so we handle it gracefully
+try:
+  from typing import TYPE_CHECKING
+except ImportError:
+  TYPE_CHECKING = False`;
+      content = content.slice(0, insertPos) + typeCheckingImport + content.slice(insertPos);
       modified = true;
     }
   }
