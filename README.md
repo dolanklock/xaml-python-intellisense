@@ -108,7 +108,11 @@ The extension automatically adds these settings to your workspace:
 5. In your Python code, add a simple inheritance pattern for full autocomplete:
 
 ```python
-from typing import TYPE_CHECKING
+# IronPython compatibility - typing module doesn't exist in IronPython
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from _MainWindow_xaml import MainWindowElements as _XAMLBase
@@ -170,10 +174,14 @@ The extension includes full type definitions for:
 
 ## How It Works
 
-The extension uses a clean inheritance-based approach. Just add 4 lines to your Python file:
+The extension uses a clean inheritance-based approach. Add this pattern to your Python file:
 
 ```python
-from typing import TYPE_CHECKING
+# IronPython compatibility - typing module doesn't exist in IronPython
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from _MainWindow_xaml import MainWindowElements as _XAMLBase
@@ -189,8 +197,8 @@ This approach:
 - ✅ Only runs during type checking (not at runtime)
 - ✅ Doesn't affect your program's behavior
 - ✅ Enables full IntelliSense in VS Code
-- ✅ Works with pyRevit and IronPython
-- ✅ Clean and minimal - just 4 lines of setup code
+- ✅ **IronPython compatible** - gracefully handles missing `typing` module
+- ✅ Clean and minimal setup code
 
 ## Troubleshooting
 
@@ -226,6 +234,22 @@ This approach:
 }
 ```
 
+### IronPython "No module named typing" error?
+
+IronPython (used by pyRevit) doesn't have the `typing` module. Use the try/except pattern:
+
+```python
+# Add this at the top of your file
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False
+```
+
+This ensures the code works in both:
+- **IronPython/pyRevit**: `TYPE_CHECKING = False`, type hints skipped at runtime
+- **VS Code/Pylance**: Full autocomplete support
+
 ## Excluding Stubs from Git
 
 The extension creates a `.gitignore` file in the typings folder. If you want to exclude the entire folder, add to your project's `.gitignore`:
@@ -243,6 +267,11 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.5.1
+- **IronPython compatibility** - gracefully handle missing `typing` module
+- Use try/except pattern for `TYPE_CHECKING` import
+- Works in both IronPython (pyRevit) and CPython (VS Code)
 
 ### v0.5.0
 - **Clean inheritance-based approach** - no more verbose individual type hints
