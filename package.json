@@ -1,0 +1,84 @@
+{
+  "name": "xaml-python-intellisense",
+  "displayName": "XAML Python IntelliSense",
+  "description": "Provides IntelliSense/autocomplete for WPF XAML elements in Python code (pyRevit/IronPython)",
+  "version": "0.1.0",
+  "publisher": "dolanklock",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dolanklock/xaml-python-intellisense"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "xaml",
+    "python",
+    "wpf",
+    "pyrevit",
+    "ironpython",
+    "intellisense",
+    "autocomplete"
+  ],
+  "activationEvents": [
+    "onLanguage:python",
+    "workspaceContains:**/*.xaml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "xaml-intellisense.generateStubs",
+        "title": "XAML: Generate Python Stubs"
+      },
+      {
+        "command": "xaml-intellisense.generateStubsForFile",
+        "title": "XAML: Generate Stub for Current File"
+      }
+    ],
+    "configuration": {
+      "title": "XAML Python IntelliSense",
+      "properties": {
+        "xamlPythonIntellisense.autoGenerate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically generate stubs when XAML files change"
+        },
+        "xamlPythonIntellisense.stubFilePrefix": {
+          "type": "string",
+          "default": "_",
+          "description": "Prefix for generated stub files"
+        },
+        "xamlPythonIntellisense.stubFileSuffix": {
+          "type": "string",
+          "default": "_xaml",
+          "description": "Suffix for generated stub files (before .pyi extension)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.0.0"
+  },
+  "dependencies": {
+    "xml2js": "^0.6.2"
+  }
+}
