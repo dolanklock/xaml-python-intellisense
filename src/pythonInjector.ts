@@ -1,12 +1,19 @@
 import * as fs from 'fs';
 import { XamlElement } from './xamlParser';
 
-interface GroupedElements {
-  [typeName: string]: XamlElement[];
+/**
+ * Generate the stub class name from the XAML base name
+ */
+function getStubClassName(baseName: string): string {
+  return baseName
+    .split(/[-_\s]/)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('') + 'Elements';
 }
 
 /**
- * Inject TYPE_CHECKING imports and class annotations into a Python file
+ * Inject TYPE_CHECKING imports and modify class inheritance for XAML type hints
+ * Uses a clean inheritance-based approach instead of verbose individual annotations
  */
 export function injectTypeAnnotations(
   pyPath: string,
@@ -17,126 +24,76 @@ export function injectTypeAnnotations(
   let content = fs.readFileSync(pyPath, 'utf-8');
   let modified = false;
 
-  // Group elements by type
-  const grouped: GroupedElements = {};
-  for (const el of elements) {
-    if (!grouped[el.type]) {
-      grouped[el.type] = [];
-    }
-    grouped[el.type].push(el);
-  }
-
-  // Filter to only user-relevant elements (exclude template parts like PART_*, border, etc.)
-  const relevantElements = elements.filter(el =>
-    !el.name.startsWith('PART_') &&
-    el.name !== 'border'
-  );
-
-  const relevantGrouped: GroupedElements = {};
-  for (const el of relevantElements) {
-    if (!relevantGrouped[el.type]) {
-      relevantGrouped[el.type] = [];
-    }
-    relevantGrouped[el.type].push(el);
-  }
-
-  // Build the type imports list
-  const typeImports: string[] = [];
-  for (const typeName of Object.keys(relevantGrouped)) {
-    typeImports.push(`_${typeName}Group`);
-    typeImports.push(`_${typeName}Type`);
-  }
-
-  // Check if TYPE_CHECKING import already exists
-  const hasTypeChecking = content.includes('from typing import TYPE_CHECKING') ||
-                          content.includes('from typing import') && content.includes('TYPE_CHECKING');
-
-  // Check if our stub import already exists (handle both .py and .pyi extensions)
+  // Get stub module name and class name
   const stubModuleName = stubFileName.replace(/\.pyi?$/, '');
-  const stubImportPattern = new RegExp(`from ${stubModuleName} import`);
-  const hasStubImport = stubImportPattern.test(content);
+  const stubClassName = getStubClassName(stubModuleName.replace(/^_/, '').replace(/_xaml$/, ''));
 
-  // Detect indentation (2 or 4 spaces)
-  const indentMatch = content.match(/^( +)def /m);
-  const indent = indentMatch ? indentMatch[1] : '  ';
+  // Check if our XAML base import already exists
+  const hasXamlBaseImport = content.includes('_XAMLBase') || content.includes(stubClassName);
+
+  // Check if TYPE_CHECKING import exists
+  const hasTypeChecking = content.includes('TYPE_CHECKING');
+
+  if (hasXamlBaseImport) {
+    // Already set up, nothing to do
+    return false;
+  }
+
+  // Find the class definition
+  const classPattern = new RegExp(`^(class\\s+${className}\\s*\\()([^)]*)(\\):)`, 'm');
+  const classMatch = content.match(classPattern);
+
+  if (!classMatch) {
+    return false;
+  }
 
   // Add TYPE_CHECKING import if needed
   if (!hasTypeChecking) {
-    // Find the imports section and add TYPE_CHECKING
-    const importMatch = content.match(/^(from typing import [^\n]+)/m);
-    if (importMatch) {
-      // Add TYPE_CHECKING to existing typing import
-      const oldImport = importMatch[1];
-      if (!oldImport.includes('TYPE_CHECKING')) {
-        const newImport = oldImport.replace('from typing import ', 'from typing import TYPE_CHECKING, ');
-        content = content.replace(oldImport, newImport);
-        modified = true;
-      }
-    } else {
-      // Add new typing import after other imports
-      const lastImportMatch = content.match(/^(import .+|from .+ import .+)$/gm);
-      if (lastImportMatch) {
-        const lastImport = lastImportMatch[lastImportMatch.length - 1];
-        const insertPos = content.indexOf(lastImport) + lastImport.length;
-        content = content.slice(0, insertPos) + '\nfrom typing import TYPE_CHECKING' + content.slice(insertPos);
-        modified = true;
-      }
+    // Find the imports section
+    const lastImportMatch = content.match(/^(import .+|from .+ import .+)$/gm);
+    if (lastImportMatch) {
+      const lastImport = lastImportMatch[lastImportMatch.length - 1];
+      const insertPos = content.indexOf(lastImport) + lastImport.length;
+      content = content.slice(0, insertPos) + '\nfrom typing import TYPE_CHECKING' + content.slice(insertPos);
+      modified = true;
     }
   }
 
-  // Add stub import in TYPE_CHECKING block if needed
-  if (!hasStubImport && typeImports.length > 0) {
-    const importStatement = `\nif TYPE_CHECKING:\n${indent}from ${stubModuleName} import (\n${indent}${indent}${typeImports.join(`, `)}\n${indent})\n`;
+  // Add the XAML base class import block before the class definition
+  const xamlImportBlock = `
+if TYPE_CHECKING:
+  from ${stubModuleName} import ${stubClassName} as _XAMLBase
+else:
+  _XAMLBase = object
 
-    // Find position after all imports (before first class or function)
-    const classMatch = content.match(/^class /m);
-    if (classMatch && classMatch.index !== undefined) {
-      // Find the blank line before the class
-      const beforeClass = content.slice(0, classMatch.index);
-      const lastNewlines = beforeClass.match(/\n+$/);
-      const insertPos = classMatch.index - (lastNewlines ? lastNewlines[0].length : 0);
+`;
 
-      // Check if TYPE_CHECKING block already exists
-      if (!content.includes('if TYPE_CHECKING:')) {
-        content = content.slice(0, insertPos) + importStatement + '\n' + content.slice(insertPos);
-        modified = true;
-      }
+  // Find position to insert (before the class definition)
+  const classIndex = content.search(new RegExp(`^class\\s+${className}\\s*\\(`, 'm'));
+  if (classIndex !== -1) {
+    // Check if import block already exists nearby
+    const beforeClass = content.slice(Math.max(0, classIndex - 200), classIndex);
+    if (!beforeClass.includes('_XAMLBase')) {
+      content = content.slice(0, classIndex) + xamlImportBlock + content.slice(classIndex);
+      modified = true;
     }
   }
 
-  // Add class annotations if needed
-  const classPattern = new RegExp(`^(class ${className}\\([^)]*\\):)\\s*\\n(\\s*"""[\\s\\S]*?""")?`, 'm');
-  const classMatch = content.match(classPattern);
+  // Update the class definition to inherit from _XAMLBase
+  // Need to re-match after potential content changes
+  const updatedClassMatch = content.match(classPattern);
+  if (updatedClassMatch) {
+    const fullMatch = updatedClassMatch[0];
+    const beforeParens = updatedClassMatch[1];
+    const inheritance = updatedClassMatch[2];
+    const afterParens = updatedClassMatch[3];
 
-  if (classMatch) {
-    // Check if annotations already exist
-    const annotationMarker = '# XAML Element Type Hints';
-    if (!content.includes(annotationMarker)) {
-      // Build annotations block
-      const annotations: string[] = [];
-      annotations.push(`${indent}# XAML Element Type Hints (auto-generated, do not edit)`);
-      annotations.push(`${indent}if TYPE_CHECKING:`);
-
-      // Add type group accessors
-      annotations.push(`${indent}${indent}# Type group accessors: self.ComboBox.element_name`);
-      for (const typeName of Object.keys(relevantGrouped)) {
-        annotations.push(`${indent}${indent}${typeName}: _${typeName}Group`);
-      }
-
-      annotations.push(`${indent}${indent}# Direct element access: self.element_name`);
-      for (const el of relevantElements) {
-        annotations.push(`${indent}${indent}${el.name}: _${el.type}Type`);
-      }
-
-      // Find where to insert (after docstring if present, or after class definition)
-      const fullMatch = classMatch[0];
-      const docstring = classMatch[2] || '';
-      const insertAfter = classMatch[1] + '\n' + docstring;
-
-      const insertPos = content.indexOf(fullMatch) + insertAfter.length;
-      const annotationBlock = '\n' + annotations.join('\n') + '\n';
-
-      content = content.slice(0, insertPos) + annotationBlock + content.slice(insertPos);
+    // Only add _XAMLBase if not already present
+    if (!inheritance.includes('_XAMLBase')) {
+      // Add _XAMLBase as first parent for proper type hints
+      const newInheritance = `_XAMLBase, ${inheritance}`;
+      const newClassDef = `${beforeParens}${newInheritance}${afterParens}`;
+      content = content.replace(fullMatch, newClassDef);
       modified = true;
     }
   }
@@ -153,15 +110,38 @@ export function injectTypeAnnotations(
  */
 export function removeTypeAnnotations(pyPath: string): boolean {
   let content = fs.readFileSync(pyPath, 'utf-8');
+  let modified = false;
 
-  // Remove the XAML Element Type Hints block
-  const annotationPattern = /\n\s*# XAML Element Type Hints \(auto-generated, do not edit\)\n\s*if TYPE_CHECKING:[\s\S]*?(?=\n\s*\n\s*[a-zA-Z_]|\n\s*def |\n\s*class |\Z)/g;
-  const newContent = content.replace(annotationPattern, '');
+  // Remove the old verbose XAML Element Type Hints block
+  const oldAnnotationPattern = /\n\s*# XAML Element Type Hints \(auto-generated, do not edit\)\n\s*if TYPE_CHECKING:[\s\S]*?(?=\n\s*\n\s*[a-zA-Z_]|\n\s*def |\n\s*class |\Z)/g;
+  const newContent = content.replace(oldAnnotationPattern, '');
 
   if (newContent !== content) {
-    fs.writeFileSync(pyPath, newContent, 'utf-8');
-    return true;
+    content = newContent;
+    modified = true;
   }
 
-  return false;
+  // Remove the XAML base import block
+  const xamlBasePattern = /\nif TYPE_CHECKING:\n\s*from _\w+_xaml import \w+ as _XAMLBase\nelse:\n\s*_XAMLBase = object\n\n?/g;
+  const finalContent = content.replace(xamlBasePattern, '\n');
+
+  if (finalContent !== content) {
+    content = finalContent;
+    modified = true;
+  }
+
+  // Remove _XAMLBase from class inheritance
+  const classPattern = /^(class\s+\w+\s*\()_XAMLBase,\s*/gm;
+  const cleanedContent = content.replace(classPattern, '$1');
+
+  if (cleanedContent !== content) {
+    content = cleanedContent;
+    modified = true;
+  }
+
+  if (modified) {
+    fs.writeFileSync(pyPath, content, 'utf-8');
+  }
+
+  return modified;
 }

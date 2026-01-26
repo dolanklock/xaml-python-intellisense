@@ -102,20 +102,22 @@ The extension automatically adds these settings to your workspace:
 ```
 
 4. **Save the file** - the extension automatically:
-   - Generates `typings/_YourFile_xaml.pyi`
-   - Injects type annotations into Python files using this XAML
+   - Generates `typings/_YourFile_xaml.py` with type definitions
+   - Configures VS Code Python settings
 
-5. In your Python code, you get full autocomplete:
+5. In your Python code, add a simple inheritance pattern for full autocomplete:
 
 ```python
-class MyWindow(forms.WPFWindow):
-    # XAML Element Type Hints (auto-generated, do not edit)
-    if TYPE_CHECKING:
-        ComboBox: _ComboBoxGroup
-        project_combobox: _ComboBoxType
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+    _XAMLBase = object
+
+class MyWindow(_XAMLBase, forms.WPFWindow):
     def setup_ui(self):
-        # Direct access - full autocomplete!
+        # Full autocomplete on all XAML elements!
         self.project_combobox.SelectedIndex = 0
         self.project_combobox.ItemsSource = ['A', 'B', 'C']
 
@@ -166,36 +168,29 @@ The extension includes full type definitions for:
 **Display**
 - TextBlock, Label, Image, ProgressBar
 
-## Generated Code
+## How It Works
 
-The extension adds this block to your Python class (inside `TYPE_CHECKING` so it doesn't run at runtime):
+The extension uses a clean inheritance-based approach. Just add 4 lines to your Python file:
 
 ```python
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from _MainWindow_xaml import (
-        _ComboBoxGroup, _ComboBoxType,
-        _ButtonGroup, _ButtonType,
-        # ... more types
-    )
+    from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+    _XAMLBase = object
 
-class MyDialog(forms.WPFWindow):
-    # XAML Element Type Hints (auto-generated, do not edit)
-    if TYPE_CHECKING:
-        # Type group accessors: self.ComboBox.element_name
-        ComboBox: _ComboBoxGroup
-        Button: _ButtonGroup
-        # Direct element access: self.element_name
-        project_combobox: _ComboBoxType
-        ok_button: _ButtonType
+class MyDialog(_XAMLBase, forms.WPFWindow):
+    # Full autocomplete works automatically!
+    pass
 ```
 
-This code:
+This approach:
 - ✅ Only runs during type checking (not at runtime)
 - ✅ Doesn't affect your program's behavior
 - ✅ Enables full IntelliSense in VS Code
 - ✅ Works with pyRevit and IronPython
+- ✅ Clean and minimal - just 4 lines of setup code
 
 ## Troubleshooting
 
@@ -248,6 +243,11 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.5.0
+- **Clean inheritance-based approach** - no more verbose individual type hints
+- Just 4 lines of code instead of 50+ for full autocomplete support
+- Uses class inheritance pattern: `class MyDialog(_XAMLBase, forms.WPFWindow)`
 
 ### v0.4.0
 - Generate `.py` files instead of `.pyi` for better Pylance compatibility

@@ -2,7 +2,7 @@
   "name": "xaml-python-intellisense",
   "displayName": "XAML Python IntelliSense",
   "description": "Provides IntelliSense/autocomplete for WPF XAML elements in Python code (pyRevit/IronPython)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "dolanklock",
   "repository": {
     "type": "git",
