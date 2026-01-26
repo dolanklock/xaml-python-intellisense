@@ -48,7 +48,7 @@ class ElementGroup:
             return object.__getattribute__(self, name)
         if name in self._names:
             return getattr(self._window, name)
-        raise AttributeError(f"'{type(self).__name__}' has no element '{name}'")
+        raise AttributeError("'{}' has no element '{}'".format(type(self).__name__, name))
 
     def __iter__(self):
         """Iterate over all elements in this group."""
