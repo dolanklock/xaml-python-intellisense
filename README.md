@@ -249,6 +249,12 @@ Contributions welcome! Please open an issue or PR on [GitHub](https://github.com
 
 ## Changelog
 
+### v0.4.0
+- Generate `.py` files instead of `.pyi` for better Pylance compatibility
+- Auto-configure `python.autoComplete.extraPaths` in addition to `python.analysis.extraPaths`
+- Create `__init__.py` in typings folder to make it a proper Python package
+- Zero configuration required - everything works automatically
+
 ### v0.3.0
 - Centralized stubs folder (`typings/` by default)
 - Auto-configure VS Code Python settings

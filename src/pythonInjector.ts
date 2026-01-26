@@ -51,8 +51,9 @@ export function injectTypeAnnotations(
   const hasTypeChecking = content.includes('from typing import TYPE_CHECKING') ||
                           content.includes('from typing import') && content.includes('TYPE_CHECKING');
 
-  // Check if our stub import already exists
-  const stubImportPattern = new RegExp(`from ${stubFileName.replace('.pyi', '')} import`);
+  // Check if our stub import already exists (handle both .py and .pyi extensions)
+  const stubModuleName = stubFileName.replace(/\.pyi?$/, '');
+  const stubImportPattern = new RegExp(`from ${stubModuleName} import`);
   const hasStubImport = stubImportPattern.test(content);
 
   // Detect indentation (2 or 4 spaces)
@@ -85,7 +86,6 @@ export function injectTypeAnnotations(
 
   // Add stub import in TYPE_CHECKING block if needed
   if (!hasStubImport && typeImports.length > 0) {
-    const stubModuleName = stubFileName.replace('.pyi', '');
     const importStatement = `\nif TYPE_CHECKING:\n${indent}from ${stubModuleName} import (\n${indent}${indent}${typeImports.join(`, `)}\n${indent})\n`;
 
     // Find position after all imports (before first class or function)

@@ -151,28 +151,46 @@ async function ensureStubsFolderConfigured(force: boolean = false): Promise<void
   }
 
   // Check current Python analysis settings
-  const pythonConfig = vscode.workspace.getConfiguration('python.analysis');
-  const currentStubPath = pythonConfig.get<string>('stubPath');
-  const currentExtraPaths = pythonConfig.get<string[]>('extraPaths') || [];
+  const pythonAnalysisConfig = vscode.workspace.getConfiguration('python.analysis');
+  const currentStubPath = pythonAnalysisConfig.get<string>('stubPath');
+  const currentAnalysisExtraPaths = pythonAnalysisConfig.get<string[]>('extraPaths') || [];
+
+  // Check current Python autoComplete settings
+  const pythonConfig = vscode.workspace.getConfiguration('python');
+  const currentAutoCompleteExtraPaths = pythonConfig.get<string[]>('autoComplete.extraPaths') || [];
 
   // Update stubPath if not set or different
   if (currentStubPath !== `./${stubsFolderName}` || force) {
-    await pythonConfig.update('stubPath', `./${stubsFolderName}`, vscode.ConfigurationTarget.Workspace);
+    await pythonAnalysisConfig.update('stubPath', `./${stubsFolderName}`, vscode.ConfigurationTarget.Workspace);
     outputChannel.appendLine(`Configured python.analysis.stubPath = "./${stubsFolderName}"`);
   }
 
-  // Add stubs folder to extraPaths if not present
+  // Add stubs folder to python.analysis.extraPaths if not present
   const stubsExtraPath = `\${workspaceFolder}/${stubsFolderName}`;
-  if (!currentExtraPaths.includes(stubsExtraPath)) {
-    const newExtraPaths = [...currentExtraPaths, stubsExtraPath];
-    await pythonConfig.update('extraPaths', newExtraPaths, vscode.ConfigurationTarget.Workspace);
+  if (!currentAnalysisExtraPaths.includes(stubsExtraPath)) {
+    const newExtraPaths = [...currentAnalysisExtraPaths, stubsExtraPath];
+    await pythonAnalysisConfig.update('extraPaths', newExtraPaths, vscode.ConfigurationTarget.Workspace);
     outputChannel.appendLine(`Added "${stubsExtraPath}" to python.analysis.extraPaths`);
+  }
+
+  // Add stubs folder to python.autoComplete.extraPaths if not present
+  if (!currentAutoCompleteExtraPaths.includes(stubsExtraPath)) {
+    const newAutoCompletePaths = [...currentAutoCompleteExtraPaths, stubsExtraPath];
+    await pythonConfig.update('autoComplete.extraPaths', newAutoCompletePaths, vscode.ConfigurationTarget.Workspace);
+    outputChannel.appendLine(`Added "${stubsExtraPath}" to python.autoComplete.extraPaths`);
+  }
+
+  // Create __init__.py for stubs folder to make it a proper Python package
+  const initPyPath = path.join(stubsPath, '__init__.py');
+  if (!fs.existsSync(initPyPath)) {
+    fs.writeFileSync(initPyPath, '# Auto-generated typings for XAML Python IntelliSense\n', 'utf-8');
+    outputChannel.appendLine(`Created ${stubsFolderName}/__init__.py`);
   }
 
   // Create .gitignore for stubs folder if it doesn't exist
   const gitignorePath = path.join(stubsPath, '.gitignore');
   if (!fs.existsSync(gitignorePath)) {
-    fs.writeFileSync(gitignorePath, '# Auto-generated stub files\n*.pyi\n', 'utf-8');
+    fs.writeFileSync(gitignorePath, '# Auto-generated stub files\n*.py\n!__init__.py\n', 'utf-8');
     outputChannel.appendLine(`Created ${stubsFolderName}/.gitignore`);
   }
 }
@@ -282,7 +300,8 @@ async function generateStubsForXaml(xamlUri: vscode.Uri, silent: boolean = false
       .join('') + 'Elements';
 
     const stubContent = generateStub(stubClassName, elements);
-    const stubFileName = `${prefix}${baseName}${suffix}.pyi`;
+    // Generate .py file (not .pyi) for better Pylance compatibility
+    const stubFileName = `${prefix}${baseName}${suffix}.py`;
     const stubPath = path.join(stubsFolder, stubFileName);
 
     fs.writeFileSync(stubPath, stubContent, 'utf-8');
@@ -327,12 +346,19 @@ function deleteStubsForXaml(xamlUri: vscode.Uri): void {
       return;
     }
 
-    const stubFileName = `${prefix}${baseName}${suffix}.pyi`;
-    const stubPath = path.join(stubsFolder, stubFileName);
+    // Delete both .py and .pyi files (for backwards compatibility)
+    const stubFileNamePy = `${prefix}${baseName}${suffix}.py`;
+    const stubFileNamePyi = `${prefix}${baseName}${suffix}.pyi`;
+    const stubPathPy = path.join(stubsFolder, stubFileNamePy);
+    const stubPathPyi = path.join(stubsFolder, stubFileNamePyi);
 
-    if (fs.existsSync(stubPath)) {
-      fs.unlinkSync(stubPath);
-      outputChannel.appendLine(`Deleted stub: ${stubFileName}`);
+    if (fs.existsSync(stubPathPy)) {
+      fs.unlinkSync(stubPathPy);
+      outputChannel.appendLine(`Deleted stub: ${stubFileNamePy}`);
+    }
+    if (fs.existsSync(stubPathPyi)) {
+      fs.unlinkSync(stubPathPyi);
+      outputChannel.appendLine(`Deleted stub: ${stubFileNamePyi}`);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
