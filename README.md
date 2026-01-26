@@ -130,6 +130,9 @@ The extension automatically adds these settings to your workspace:
 5. In your Python code, add a simple inheritance pattern for full autocomplete:
 
 ```python
+from pyrevit import forms
+from wpf_helpers import setup_element_groups
+
 # IronPython compatibility - typing module doesn't exist in IronPython
 try:
     from typing import TYPE_CHECKING
@@ -142,6 +145,10 @@ else:
     _XAMLBase = forms.WPFWindow  # Use actual base class at runtime
 
 class MyWindow(_XAMLBase):  # Only inherit from _XAMLBase
+    def __init__(self):
+        self.load_xaml('MainWindow.xaml')
+        setup_element_groups(self)  # Required for type group access
+
     def setup_ui(self):
         # Full autocomplete on all XAML elements!
         self.project_combobox.SelectedIndex = 0
@@ -199,6 +206,9 @@ The extension includes full type definitions for:
 The extension uses a clean inheritance-based approach. Add this pattern to your Python file:
 
 ```python
+from pyrevit import forms
+from wpf_helpers import setup_element_groups
+
 # IronPython compatibility - typing module doesn't exist in IronPython
 try:
     from typing import TYPE_CHECKING
@@ -211,8 +221,9 @@ else:
     _XAMLBase = forms.WPFWindow  # Use actual base class at runtime
 
 class MyDialog(_XAMLBase):  # Only inherit from _XAMLBase
-    # Full autocomplete works automatically!
-    pass
+    def __init__(self):
+        self.load_xaml('MainWindow.xaml')
+        setup_element_groups(self)  # Required for type group access (self.ComboBox.name)
 ```
 
 This approach:
@@ -221,7 +232,7 @@ This approach:
 - ✅ Enables full IntelliSense in VS Code
 - ✅ **IronPython compatible** - gracefully handles missing `typing` module
 - ✅ **MRO compatible** - avoids inheritance conflicts with WPFWindow
-- ✅ Clean and minimal setup code
+- ✅ **Type group access** - use `self.ComboBox.element_name` patterns
 
 ## Troubleshooting
 
