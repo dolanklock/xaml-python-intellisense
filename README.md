@@ -48,25 +48,47 @@ When you save a XAML file, the extension automatically:
 
 1. **Parses the XAML** to find all elements with `x:Name` attributes
 2. **Creates a `typings/` folder** at your workspace root (if it doesn't exist)
-3. **Generates a `.pyi` stub file** in the typings folder with type definitions
+3. **Generates a `.py` stub file** in the typings folder with type definitions
 4. **Configures VS Code settings** to recognize the stubs folder
 5. **Finds Python files** that reference the XAML (classes inheriting from `WPFWindow`)
 6. **Injects type annotations** into your Python class automatically
+7. **For pyRevit**: Auto-detects `.extension` folders and copies `wpf_helpers.py` to the `lib/` folder for runtime support
 
 ### Project Structure After Setup
 
+**Standard Python project:**
 ```
 your-project/
 ├── typings/                        # Auto-created stubs folder
 │   ├── .gitignore                  # Ignores *.pyi files
-│   ├── _MainWindow_xaml.pyi        # Generated stub
-│   └── _EditDialog_xaml.pyi        # Generated stub
+│   ├── wpf_helpers.py              # Runtime helper for type groups
+│   ├── _MainWindow_xaml.py         # Generated stub
+│   └── _EditDialog_xaml.py         # Generated stub
 ├── .vscode/
 │   └── settings.json               # Auto-configured with stubPath
 ├── UI/
 │   ├── MainWindow.xaml
 │   └── EditDialog.xaml
 └── my_dialog.py                    # Auto-injected with type hints
+```
+
+**pyRevit extension:**
+```
+your-project/
+├── typings/                        # Stubs for IDE support
+│   └── ...
+├── tools.extension/                # pyRevit extension folder
+│   ├── lib/
+│   │   └── wpf_helpers.py          # Auto-copied here for runtime
+│   └── MyTool.tab/
+│       └── MyPanel.panel/
+│           └── MyButton.pushbutton/
+│               ├── script.py
+│               ├── my_dialog.py    # Auto-injected with type hints
+│               └── UI/
+│                   └── MainWindow.xaml
+└── .vscode/
+    └── settings.json
 ```
 
 ### Auto-Generated VS Code Settings
@@ -268,6 +290,13 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.6.0
+- **Automatic type group support** - `self.ComboBox.element_name`, `self.Button.element_name` patterns now work automatically
+- Auto-copies `wpf_helpers.py` to your typings folder (for IDE support)
+- **pyRevit integration** - Auto-detects `.extension` folders and copies `wpf_helpers.py` to `lib/` folder for runtime support
+- Auto-injects `setup_element_groups(self)` call after XAML is loaded in `__init__`
+- Iterate over all elements of a type: `for combo in self.ComboBox: ...`
 
 ### v0.5.2
 - **Fix MRO (Method Resolution Order) error** - fixes "Cannot create a consistent method resolution order" error in IronPython

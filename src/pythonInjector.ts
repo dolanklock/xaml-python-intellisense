@@ -112,6 +112,49 @@ else:
     }
   }
 
+  // Add wpf_helpers import and setup_element_groups call for type group support
+  const hasWpfHelpersImport = content.includes('from wpf_helpers import') || content.includes('import wpf_helpers');
+  const hasSetupElementGroups = content.includes('setup_element_groups');
+
+  if (!hasWpfHelpersImport) {
+    // Find the imports section and add wpf_helpers import
+    const lastImportMatch = content.match(/^(import .+|from .+ import .+)$/gm);
+    if (lastImportMatch) {
+      const lastImport = lastImportMatch[lastImportMatch.length - 1];
+      const insertPos = content.indexOf(lastImport) + lastImport.length;
+      const wpfHelpersImport = `\nfrom wpf_helpers import setup_element_groups`;
+      content = content.slice(0, insertPos) + wpfHelpersImport + content.slice(insertPos);
+      modified = true;
+    }
+  }
+
+  // Add setup_element_groups(self) call in __init__ after XAML is loaded
+  if (!hasSetupElementGroups) {
+    // Look for common patterns where XAML is loaded:
+    // - self.load_xaml(...)
+    // - forms.WPFWindow.__init__(self, ...)
+    // - WPFWindow.__init__(self, ...)
+    const xamlLoadPatterns = [
+      /^(\s*)(self\.load_xaml\([^)]+\))$/gm,
+      /^(\s*)(forms\.WPFWindow\.__init__\(self[^)]*\))$/gm,
+      /^(\s*)(WPFWindow\.__init__\(self[^)]*\))$/gm,
+    ];
+
+    for (const pattern of xamlLoadPatterns) {
+      const match = pattern.exec(content);
+      if (match) {
+        const fullMatch = match[0];
+        const indent = match[1];
+        const statement = match[2];
+        // Insert setup_element_groups(self) on the next line with same indentation
+        const replacement = `${indent}${statement}\n${indent}setup_element_groups(self)`;
+        content = content.replace(fullMatch, replacement);
+        modified = true;
+        break;
+      }
+    }
+  }
+
   if (modified) {
     fs.writeFileSync(pyPath, content, 'utf-8');
   }
@@ -158,6 +201,22 @@ export function removeTypeAnnotations(pyPath: string): boolean {
 
   if (cleanedContent !== content) {
     content = cleanedContent;
+    modified = true;
+  }
+
+  // Remove wpf_helpers import
+  const wpfHelpersImportPattern = /\nfrom wpf_helpers import setup_element_groups/g;
+  const noWpfImport = content.replace(wpfHelpersImportPattern, '');
+  if (noWpfImport !== content) {
+    content = noWpfImport;
+    modified = true;
+  }
+
+  // Remove setup_element_groups(self) call
+  const setupElementGroupsPattern = /\n\s*setup_element_groups\(self\)/g;
+  const noSetupCall = content.replace(setupElementGroupsPattern, '');
+  if (noSetupCall !== content) {
+    content = noSetupCall;
     modified = true;
   }
 
