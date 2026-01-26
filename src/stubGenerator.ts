@@ -546,3 +546,136 @@ export function generateStub(
 export function getSupportedTypes(): string[] {
   return Object.keys(TYPE_DEFINITIONS);
 }
+
+/**
+ * Generate a stub file that matches a Python file's class
+ * This creates a .pyi file that Pylance will automatically associate with the .py file
+ */
+export function generatePythonFileStub(
+  className: string,
+  elements: XamlElement[]
+): string {
+  const lines: string[] = [
+    '# Auto-generated stub file for XAML bindings',
+    '# Do not edit manually - regenerated on XAML changes',
+    '#',
+    '# This stub provides type hints for XAML elements accessed via self.*',
+    '',
+    'from typing import Any, Optional, List, Union',
+    '',
+    '# Type aliases for WPF types',
+    'Visibility = Any',
+    'Brush = Any',
+    'FontWeight = Any',
+    'FontFamily = Any',
+    'FontStyle = Any',
+    'Thickness = Any',
+    'CornerRadius = Any',
+    'ICommand = Any',
+    'ItemCollection = Any',
+    'IList = Any',
+    'UIElement = Any',
+    'UIElementCollection = Any',
+    'ImageSource = Any',
+    'ViewBase = Any',
+    'SelectionMode = Any',
+    'ScrollBarVisibility = Any',
+    'TextWrapping = Any',
+    'TextTrimming = Any',
+    'TextAlignment = Any',
+    'HorizontalAlignment = Any',
+    'VerticalAlignment = Any',
+    'Orientation = Any',
+    'Stretch = Any',
+    'StretchDirection = Any',
+    'Dock = Any',
+    'ClickMode = Any',
+    'TickPlacement = Any',
+    'ExpandDirection = Any',
+    'PlacementMode = Any',
+    'FlowDocument = Any',
+    'DateTime = Any',
+    'DayOfWeek = Any',
+    'DataGridSelectionMode = Any',
+    'DataGridSelectionUnit = Any',
+    'DataGridGridLinesVisibility = Any',
+    'DataGridHeadersVisibility = Any',
+    'DataGridCellInfo = Any',
+    'DataGridColumn = Any',
+    'ObservableCollection = Any',
+    'RowDefinitionCollection = Any',
+    'ColumnDefinitionCollection = Any',
+    'SelectedDatesCollection = Any',
+    'CalendarSelectionMode = Any',
+    'CalendarMode = Any',
+    '',
+  ];
+
+  // Group elements by type
+  const grouped: GroupedElements = {};
+  for (const el of elements) {
+    if (!grouped[el.type]) {
+      grouped[el.type] = [];
+    }
+    grouped[el.type].push(el);
+  }
+
+  // Generate individual element type classes with full definitions
+  for (const typeName of Object.keys(grouped)) {
+    const props = TYPE_DEFINITIONS[typeName] || [];
+
+    lines.push(`class _${typeName}Type:`);
+    lines.push(`    """WPF ${typeName} control"""`);
+    if (props.length > 0) {
+      for (const prop of props) {
+        lines.push(`    ${prop}`);
+      }
+    } else {
+      lines.push('    IsEnabled: bool');
+      lines.push('    Visibility: Visibility');
+      lines.push('    Width: float');
+      lines.push('    Height: float');
+    }
+    lines.push('');
+  }
+
+  // Generate group accessor classes
+  for (const [typeName, typeElements] of Object.entries(grouped)) {
+    lines.push(`class _${typeName}Group:`);
+    lines.push(`    """Access all ${typeName} elements by x:Name"""`);
+    for (const el of typeElements) {
+      lines.push(`    ${el.name}: _${typeName}Type`);
+    }
+    lines.push('');
+  }
+
+  // Generate the main class that matches the user's class name
+  lines.push(`class ${className}:`);
+  lines.push('    """');
+  lines.push('    Type hints for XAML elements. Access via:');
+  lines.push('      self.element_name          - Direct access');
+  lines.push('      self.ComboBox.element_name - Type group access');
+  lines.push('    """');
+  lines.push('');
+
+  // Add type group accessors
+  if (Object.keys(grouped).length > 0) {
+    for (const typeName of Object.keys(grouped)) {
+      lines.push(`    ${typeName}: _${typeName}Group`);
+    }
+    lines.push('');
+  }
+
+  // Add direct element accessors
+  if (elements.length > 0) {
+    for (const el of elements) {
+      lines.push(`    ${el.name}: _${el.type}Type`);
+    }
+  }
+
+  // Add ellipsis to indicate there are more members
+  lines.push('');
+  lines.push('    def __init__(self, *args: Any, **kwargs: Any) -> None: ...');
+
+  return lines.join('\n');
+}

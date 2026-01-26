@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseXaml, isXamlFile } from './xamlParser';
 import { generateStub } from './stubGenerator';
+import { injectTypeAnnotations } from './pythonInjector';
 
 let outputChannel: vscode.OutputChannel;
 
@@ -11,28 +12,27 @@ export function activate(context: vscode.ExtensionContext) {
   outputChannel.appendLine('XAML Python IntelliSense extension activated');
 
   // Watch for XAML file changes
-  const watcher = vscode.workspace.createFileSystemWatcher('**/*.xaml');
+  const xamlWatcher = vscode.workspace.createFileSystemWatcher('**/*.xaml');
 
-  watcher.onDidChange(uri => {
+  xamlWatcher.onDidChange(uri => {
     const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
     if (config.get<boolean>('autoGenerate', true)) {
-      generateStubForXaml(uri);
+      generateStubsForXaml(uri);
     }
   });
 
-  watcher.onDidCreate(uri => {
+  xamlWatcher.onDidCreate(uri => {
     const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
     if (config.get<boolean>('autoGenerate', true)) {
-      generateStubForXaml(uri);
+      generateStubsForXaml(uri);
     }
   });
 
-  watcher.onDidDelete(uri => {
-    // Remove the stub file when XAML is deleted
-    deleteStubForXaml(uri);
+  xamlWatcher.onDidDelete(uri => {
+    deleteStubsForXaml(uri);
   });
 
-  context.subscriptions.push(watcher);
+  context.subscriptions.push(xamlWatcher);
 
   // Command to manually generate stubs for all XAML files
   const generateAllCommand = vscode.commands.registerCommand(
@@ -40,19 +40,16 @@ export function activate(context: vscode.ExtensionContext) {
     async () => {
       const xamlFiles = await vscode.workspace.findFiles('**/*.xaml');
       let generated = 0;
-      let skipped = 0;
+      let pyModified = 0;
 
       for (const file of xamlFiles) {
-        const result = await generateStubForXaml(file);
-        if (result) {
-          generated++;
-        } else {
-          skipped++;
-        }
+        const result = await generateStubsForXaml(file);
+        generated += result.stubs;
+        pyModified += result.pyFiles;
       }
 
       vscode.window.showInformationMessage(
-        `XAML Stubs: Generated ${generated}, Skipped ${skipped} (no named elements)`
+        `XAML IntelliSense: Generated ${generated} stub files, updated ${pyModified} Python files`
       );
     }
   );
@@ -73,9 +70,11 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const result = await generateStubForXaml(editor.document.uri);
-      if (result) {
-        vscode.window.showInformationMessage(`Generated stub: ${result}`);
+      const result = await generateStubsForXaml(editor.document.uri);
+      if (result.stubs > 0) {
+        vscode.window.showInformationMessage(
+          `Generated ${result.stubs} stub file(s), updated ${result.pyFiles} Python file(s)`
+        );
       } else {
         vscode.window.showWarningMessage('No named elements found in XAML file');
       }
@@ -96,16 +95,69 @@ async function generateAllStubsOnStartup(): Promise<void> {
   }
 
   const xamlFiles = await vscode.workspace.findFiles('**/*.xaml');
+  let totalStubs = 0;
+  let totalPyFiles = 0;
+
   for (const file of xamlFiles) {
-    await generateStubForXaml(file, true); // silent mode on startup
+    const result = await generateStubsForXaml(file, true);
+    totalStubs += result.stubs;
+    totalPyFiles += result.pyFiles;
   }
 
-  if (xamlFiles.length > 0) {
-    outputChannel.appendLine(`Generated stubs for ${xamlFiles.length} XAML files on startup`);
+  if (totalStubs > 0) {
+    outputChannel.appendLine(`Startup: Generated ${totalStubs} stub files, updated ${totalPyFiles} Python files`);
   }
 }
 
-async function generateStubForXaml(xamlUri: vscode.Uri, silent: boolean = false): Promise<string | null> {
+/**
+ * Find Python files that reference a XAML file
+ */
+function findPythonFilesUsingXaml(xamlPath: string): Array<{pyPath: string, className: string}> {
+  const dir = path.dirname(xamlPath);
+  const xamlFileName = path.basename(xamlPath);
+  const xamlBaseName = path.basename(xamlPath, '.xaml');
+  const results: Array<{pyPath: string, className: string}> = [];
+
+  // Also check parent directory (for cases like UI/file.xaml with script in parent)
+  const dirsToCheck = [dir, path.dirname(dir)];
+
+  for (const checkDir of dirsToCheck) {
+    if (!fs.existsSync(checkDir)) continue;
+
+    const files = fs.readdirSync(checkDir);
+
+    for (const file of files) {
+      if (!file.endsWith('.py')) continue;
+
+      const pyPath = path.join(checkDir, file);
+      const content = fs.readFileSync(pyPath, 'utf-8');
+
+      // Check if this Python file references the XAML file
+      if (content.includes(xamlFileName) || content.includes(xamlBaseName)) {
+        // Find class names that inherit from WPFWindow
+        const classMatches = content.matchAll(/class\s+(\w+)\s*\([^)]*(?:WPFWindow|forms\.WPFWindow)[^)]*\)/g);
+
+        for (const match of classMatches) {
+          results.push({
+            pyPath: pyPath,
+            className: match[1]
+          });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+interface GenerationResult {
+  stubs: number;
+  pyFiles: number;
+}
+
+async function generateStubsForXaml(xamlUri: vscode.Uri, silent: boolean = false): Promise<GenerationResult> {
+  const result: GenerationResult = { stubs: 0, pyFiles: 0 };
+
   try {
     const xamlPath = xamlUri.fsPath;
     const dir = path.dirname(xamlPath);
@@ -116,41 +168,64 @@ async function generateStubForXaml(xamlUri: vscode.Uri, silent: boolean = false)
 
     if (elements.length === 0) {
       outputChannel.appendLine(`Skipped ${baseName}.xaml - no named elements`);
-      return null;
+      return result;
     }
 
     // Get configuration
     const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
     const prefix = config.get<string>('stubFilePrefix', '_');
     const suffix = config.get<string>('stubFileSuffix', '_xaml');
+    const autoInject = config.get<boolean>('autoInjectAnnotations', true);
 
-    // Generate class name from file name (PascalCase)
-    const className = baseName
+    // Generate the XAML-named stub file
+    const stubClassName = baseName
       .split(/[-_\s]/)
       .map(part => part.charAt(0).toUpperCase() + part.slice(1))
       .join('') + 'Elements';
 
-    // Generate stub content
-    const stubContent = generateStub(className, elements);
+    const stubContent = generateStub(stubClassName, elements);
     const stubFileName = `${prefix}${baseName}${suffix}.pyi`;
     const stubPath = path.join(dir, stubFileName);
 
     fs.writeFileSync(stubPath, stubContent, 'utf-8');
-
     outputChannel.appendLine(`Generated stub: ${stubFileName} (${elements.length} elements)`);
+    result.stubs++;
 
-    return stubFileName;
+    // Find Python files that use this XAML and inject type annotations
+    if (autoInject) {
+      const pyFiles = findPythonFilesUsingXaml(xamlPath);
+
+      for (const { pyPath, className } of pyFiles) {
+        const pyDir = path.dirname(pyPath);
+
+        // Copy stub file to Python file directory if different
+        if (pyDir !== dir) {
+          const targetStubPath = path.join(pyDir, stubFileName);
+          fs.copyFileSync(stubPath, targetStubPath);
+          outputChannel.appendLine(`Copied stub to: ${path.basename(pyDir)}/${stubFileName}`);
+        }
+
+        // Inject type annotations into Python file
+        const injected = injectTypeAnnotations(pyPath, className, elements, stubFileName);
+        if (injected) {
+          outputChannel.appendLine(`Injected type annotations into: ${path.basename(pyPath)}`);
+          result.pyFiles++;
+        }
+      }
+    }
+
+    return result;
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Error generating stub for ${xamlUri.fsPath}: ${errorMessage}`);
     if (!silent) {
       vscode.window.showErrorMessage(`Error generating XAML stub: ${errorMessage}`);
     }
-    return null;
+    return result;
   }
 }
 
-function deleteStubForXaml(xamlUri: vscode.Uri): void {
+function deleteStubsForXaml(xamlUri: vscode.Uri): void {
   try {
     const xamlPath = xamlUri.fsPath;
     const dir = path.dirname(xamlPath);

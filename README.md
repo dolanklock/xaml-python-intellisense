@@ -4,27 +4,59 @@ A VS Code extension that provides IntelliSense/autocomplete for WPF XAML element
 
 ## Features
 
-- **Automatic stub generation**: When you save a XAML file, the extension automatically generates a `.pyi` stub file with type hints
-- **Direct element access**: Get autocomplete for `self.element_name` based on `x:Name` attributes in your XAML
+- **Automatic stub generation**: Generates `.pyi` stub files with full type definitions for all XAML elements
+- **Auto-injection of type hints**: Automatically adds `TYPE_CHECKING` imports and class annotations to your Python files
+- **Direct element access**: Get autocomplete for `self.element_name` based on `x:Name` attributes
 - **Type group access**: Access elements grouped by type with `self.ComboBox.element_name`, `self.Button.element_name`, etc.
 - **Full WPF type support**: Includes properties and methods for 30+ WPF controls
+- **Zero manual setup**: Just save your XAML file and autocomplete works automatically
+
+## How It Works
+
+When you save a XAML file, the extension:
+
+1. **Parses the XAML** to find all elements with `x:Name` attributes
+2. **Generates a `.pyi` stub file** with type definitions for all controls
+3. **Finds Python files** that reference the XAML (classes inheriting from `WPFWindow`)
+4. **Injects type annotations** into your Python class automatically
+
+### Before (no autocomplete)
+```python
+class MyDialog(forms.WPFWindow):
+    def setup(self):
+        self.my_combobox  # No autocomplete - Pylance doesn't know the type
+```
+
+### After (full autocomplete)
+```python
+class MyDialog(forms.WPFWindow):
+    # XAML Element Type Hints (auto-generated, do not edit)
+    if TYPE_CHECKING:
+        ComboBox: _ComboBoxGroup
+        my_combobox: _ComboBoxType
+
+    def setup(self):
+        self.my_combobox.  # Full autocomplete! SelectedItem, ItemsSource, etc.
+        self.ComboBox.my_combobox.  # Also works via type groups
+```
 
 ## Installation
 
+### From VSIX (Local Install)
+
+1. Download the `.vsix` file from releases
+2. In VS Code: Extensions → `...` → Install from VSIX
+3. Select the downloaded file
+
 ### From Source
 
-1. Clone this repository
-2. Run `npm install`
-3. Run `npm run compile`
-4. Press F5 in VS Code to launch the extension in debug mode
-
-### Package as VSIX
-
 ```bash
+git clone https://github.com/dolanklock/xaml-python-intellisense
+cd xaml-python-intellisense
+npm install
 npm run package
+# Install the generated .vsix file
 ```
-
-Then install the generated `.vsix` file in VS Code.
 
 ## Usage
 
@@ -37,153 +69,129 @@ Then install the generated `.vsix` file in VS Code.
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StackPanel>
         <ComboBox x:Name="project_combobox"/>
-        <ComboBox x:Name="category_combobox"/>
         <Button x:Name="ok_button" Content="OK"/>
-        <Button x:Name="cancel_button" Content="Cancel"/>
         <TextBox x:Name="search_textbox"/>
     </StackPanel>
 </Window>
 ```
 
-2. Save the file - a stub file (`_YourFile_xaml.pyi`) is automatically generated
+2. **Save the file** - the extension automatically:
+   - Generates `_YourFile_xaml.pyi` stub file
+   - Injects type annotations into Python files using this XAML
 
-3. In your Python code, you now get autocomplete:
+3. In your Python code, you get full autocomplete:
 
 ```python
-from pyrevit import forms
-
 class MyWindow(forms.WPFWindow):
-    def __init__(self):
-        forms.WPFWindow.__init__(self, 'MainWindow.xaml')
-
     def setup_ui(self):
-        # Direct access - autocomplete shows all ComboBox properties
+        # Direct access
         self.project_combobox.SelectedIndex = 0
-        self.project_combobox.ItemsSource = ['Project A', 'Project B']
+        self.project_combobox.ItemsSource = ['A', 'B', 'C']
 
         # Type group access - see all ComboBoxes at once
         self.ComboBox.project_combobox.IsEnabled = True
-        self.ComboBox.category_combobox.IsEnabled = False
-
-        # Same for buttons
-        self.Button.ok_button.Content = "Submit"
-        self.Button.cancel_button.IsEnabled = True
 ```
 
 ### Manual Commands
 
-- **XAML: Generate Python Stubs** - Generate stubs for all XAML files in the workspace
-- **XAML: Generate Stub for Current File** - Generate stub for the currently open XAML file
+- **Cmd/Ctrl+Shift+P** → `XAML: Generate Python Stubs` - Process all XAML files in workspace
+- **Cmd/Ctrl+Shift+P** → `XAML: Generate Stub for Current File` - Process current XAML file
 
 ## Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `xamlPythonIntellisense.autoGenerate` | `true` | Automatically generate stubs when XAML files change |
+| `xamlPythonIntellisense.autoInjectAnnotations` | `true` | Automatically inject type hints into Python files |
 | `xamlPythonIntellisense.stubFilePrefix` | `_` | Prefix for generated stub files |
-| `xamlPythonIntellisense.stubFileSuffix` | `_xaml` | Suffix for generated stub files (before .pyi) |
+| `xamlPythonIntellisense.stubFileSuffix` | `_xaml` | Suffix for generated stub files |
 
 ## Supported WPF Controls
 
 The extension includes full type definitions for:
 
-- **Input Controls**: Button, TextBox, ComboBox, CheckBox, RadioButton, Slider, PasswordBox, RichTextBox, DatePicker, Calendar
-- **List Controls**: ListView, ListBox, DataGrid, TreeView
-- **Layout Controls**: Grid, StackPanel, WrapPanel, DockPanel, Canvas, Border, ScrollViewer, Expander, GroupBox
-- **Navigation**: TabControl, TabItem, Menu, MenuItem, ContextMenu, ToolBar, StatusBar
-- **Display**: TextBlock, Label, Image, ProgressBar
+**Input Controls**
+- Button, TextBox, ComboBox, CheckBox, RadioButton
+- Slider, PasswordBox, RichTextBox, DatePicker, Calendar
 
-## Runtime Support for Type Groups
+**List Controls**
+- ListView, ListBox, DataGrid, TreeView
 
-The stub files provide IDE autocomplete, but to make `self.ComboBox.element_name` work at runtime, add this helper to your project:
+**Layout Controls**
+- Grid, StackPanel, WrapPanel, DockPanel, Canvas
+- Border, ScrollViewer, Expander, GroupBox
+
+**Navigation**
+- TabControl, TabItem, Menu, MenuItem
+- ContextMenu, ToolBar, StatusBar
+
+**Display**
+- TextBlock, Label, Image, ProgressBar
+
+## Project Structure
+
+```
+your-project/
+├── UI/
+│   ├── MainWindow.xaml          # Your XAML file
+│   └── _MainWindow_xaml.pyi     # Auto-generated stub
+├── main_dialog.py               # Your Python file
+└── _MainWindow_xaml.pyi         # Stub copied here for imports
+```
+
+## Generated Code
+
+The extension adds a block like this to your Python class:
 
 ```python
-# lib/wpf_helpers.py
+from typing import TYPE_CHECKING
 
-class ElementGroup:
-    """Runtime accessor for grouped XAML elements"""
-    def __init__(self, window, element_names):
-        self._window = window
-        self._names = element_names
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            return object.__getattribute__(self, name)
-        return getattr(self._window, name)
-
-
-def setup_element_groups(window):
-    """
-    Set up type group accessors on a WPFWindow instance.
-    Call this after loading the XAML.
-    """
-    from System.Windows.Controls import (
-        Button, TextBox, ComboBox, CheckBox, RadioButton,
-        ListView, ListBox, DataGrid, TextBlock, Label,
-        ProgressBar, Slider, TabControl, Image
+if TYPE_CHECKING:
+    from _MainWindow_xaml import (
+        _ComboBoxGroup, _ComboBoxType,
+        _ButtonGroup, _ButtonType,
+        # ... more types
     )
 
-    type_map = {
-        Button: 'Button',
-        TextBox: 'TextBox',
-        ComboBox: 'ComboBox',
-        CheckBox: 'CheckBox',
-        RadioButton: 'RadioButton',
-        ListView: 'ListView',
-        ListBox: 'ListBox',
-        DataGrid: 'DataGrid',
-        TextBlock: 'TextBlock',
-        Label: 'Label',
-        ProgressBar: 'ProgressBar',
-        Slider: 'Slider',
-        TabControl: 'TabControl',
-        Image: 'Image',
-    }
-
-    groups = {name: [] for name in type_map.values()}
-
-    # Find all named elements and group by type
-    for attr_name in dir(window):
-        if attr_name.startswith('_'):
-            continue
-        try:
-            element = getattr(window, attr_name)
-            for wpf_type, group_name in type_map.items():
-                if isinstance(element, wpf_type):
-                    groups[group_name].append(attr_name)
-                    break
-        except:
-            pass
-
-    # Create group accessors
-    for group_name, element_names in groups.items():
-        if element_names:
-            group = ElementGroup(window, element_names)
-            setattr(window, group_name, group)
+class MyDialog(forms.WPFWindow):
+    # XAML Element Type Hints (auto-generated, do not edit)
+    if TYPE_CHECKING:
+        # Type group accessors: self.ComboBox.element_name
+        ComboBox: _ComboBoxGroup
+        Button: _ButtonGroup
+        # Direct element access: self.element_name
+        project_combobox: _ComboBoxType
+        ok_button: _ButtonType
 ```
 
-Usage:
+This code:
+- Only runs during type checking (not at runtime)
+- Doesn't affect your program's behavior
+- Enables full IntelliSense in VS Code
 
-```python
-from pyrevit import forms
-from wpf_helpers import setup_element_groups
+## Requirements
 
-class MyWindow(forms.WPFWindow):
-    def __init__(self):
-        forms.WPFWindow.__init__(self, 'MainWindow.xaml')
-        setup_element_groups(self)  # Enable self.ComboBox.*, self.Button.*, etc.
-```
+- VS Code 1.74.0 or higher
+- Pylance extension (for Python type checking)
 
-## How It Works
+## Troubleshooting
 
-1. The extension watches for XAML file changes
-2. When a XAML file is saved, it parses the XML to find all elements with `x:Name` attributes
-3. It generates a `.pyi` stub file with:
-   - Type classes for each WPF control with all properties/methods
-   - Group accessor classes for accessing elements by type
-   - A main class with all direct element references
-4. Pylance/Pyright picks up the stub file and provides autocomplete
+### Autocomplete not working?
+
+1. **Reload VS Code**: Cmd/Ctrl+Shift+P → "Reload Window"
+2. **Restart Pylance**: Cmd/Ctrl+Shift+P → "Python: Restart Language Server"
+3. **Check Output**: View → Output → Select "XAML Python IntelliSense"
+
+### Types not updating after XAML change?
+
+1. Make sure you **saved** the XAML file
+2. Run `XAML: Generate Python Stubs` manually
+3. Check the Output panel for errors
 
 ## License
 
 MIT
+
+## Contributing
+
+Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
