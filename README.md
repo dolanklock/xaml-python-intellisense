@@ -117,9 +117,9 @@ except ImportError:
 if TYPE_CHECKING:
     from _MainWindow_xaml import MainWindowElements as _XAMLBase
 else:
-    _XAMLBase = object
+    _XAMLBase = forms.WPFWindow  # Use actual base class at runtime
 
-class MyWindow(_XAMLBase, forms.WPFWindow):
+class MyWindow(_XAMLBase):  # Only inherit from _XAMLBase
     def setup_ui(self):
         # Full autocomplete on all XAML elements!
         self.project_combobox.SelectedIndex = 0
@@ -186,9 +186,9 @@ except ImportError:
 if TYPE_CHECKING:
     from _MainWindow_xaml import MainWindowElements as _XAMLBase
 else:
-    _XAMLBase = object
+    _XAMLBase = forms.WPFWindow  # Use actual base class at runtime
 
-class MyDialog(_XAMLBase, forms.WPFWindow):
+class MyDialog(_XAMLBase):  # Only inherit from _XAMLBase
     # Full autocomplete works automatically!
     pass
 ```
@@ -198,6 +198,7 @@ This approach:
 - ✅ Doesn't affect your program's behavior
 - ✅ Enables full IntelliSense in VS Code
 - ✅ **IronPython compatible** - gracefully handles missing `typing` module
+- ✅ **MRO compatible** - avoids inheritance conflicts with WPFWindow
 - ✅ Clean and minimal setup code
 
 ## Troubleshooting
@@ -267,6 +268,12 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.5.2
+- **Fix MRO (Method Resolution Order) error** - fixes "Cannot create a consistent method resolution order" error in IronPython
+- Changed inheritance pattern: `_XAMLBase = forms.WPFWindow` instead of `_XAMLBase = object`
+- Class now inherits only from `_XAMLBase` instead of `(_XAMLBase, forms.WPFWindow)`
+- This avoids inheritance conflicts when WPFWindow already inherits from object
 
 ### v0.5.1
 - **IronPython compatibility** - gracefully handle missing `typing` module

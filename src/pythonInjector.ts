@@ -67,12 +67,18 @@ except ImportError:
     }
   }
 
+  // Get the existing base class from the class definition to use at runtime
+  // This avoids MRO conflicts by not having both object and WPFWindow in the inheritance chain
+  const existingBaseClass = classMatch[2].trim().split(',')[0].trim() || 'object';
+
   // Add the XAML base class import block before the class definition
+  // At runtime, _XAMLBase becomes the actual base class (e.g., forms.WPFWindow)
+  // This avoids the MRO error that occurs with (_XAMLBase, forms.WPFWindow) when _XAMLBase = object
   const xamlImportBlock = `
 if TYPE_CHECKING:
   from ${stubModuleName} import ${stubClassName} as _XAMLBase
 else:
-  _XAMLBase = object
+  _XAMLBase = ${existingBaseClass}
 
 `;
 
@@ -87,7 +93,8 @@ else:
     }
   }
 
-  // Update the class definition to inherit from _XAMLBase
+  // Update the class definition to inherit only from _XAMLBase
+  // Since _XAMLBase becomes the actual base class at runtime, we don't need multiple inheritance
   // Need to re-match after potential content changes
   const updatedClassMatch = content.match(classPattern);
   if (updatedClassMatch) {
@@ -96,11 +103,10 @@ else:
     const inheritance = updatedClassMatch[2];
     const afterParens = updatedClassMatch[3];
 
-    // Only add _XAMLBase if not already present
+    // Only modify if not already using _XAMLBase
     if (!inheritance.includes('_XAMLBase')) {
-      // Add _XAMLBase as first parent for proper type hints
-      const newInheritance = `_XAMLBase, ${inheritance}`;
-      const newClassDef = `${beforeParens}${newInheritance}${afterParens}`;
+      // Replace inheritance with just _XAMLBase to avoid MRO conflicts
+      const newClassDef = `${beforeParens}_XAMLBase${afterParens}`;
       content = content.replace(fullMatch, newClassDef);
       modified = true;
     }
@@ -129,8 +135,8 @@ export function removeTypeAnnotations(pyPath: string): boolean {
     modified = true;
   }
 
-  // Remove the XAML base import block
-  const xamlBasePattern = /\nif TYPE_CHECKING:\n\s*from _\w+_xaml import \w+ as _XAMLBase\nelse:\n\s*_XAMLBase = object\n\n?/g;
+  // Remove the XAML base import block (handles both object and actual base class patterns)
+  const xamlBasePattern = /\nif TYPE_CHECKING:\n\s*from _\w+_xaml import \w+ as _XAMLBase\nelse:\n\s*_XAMLBase = [\w.]+\n\n?/g;
   const finalContent = content.replace(xamlBasePattern, '\n');
 
   if (finalContent !== content) {
@@ -138,9 +144,17 @@ export function removeTypeAnnotations(pyPath: string): boolean {
     modified = true;
   }
 
-  // Remove _XAMLBase from class inheritance
-  const classPattern = /^(class\s+\w+\s*\()_XAMLBase,\s*/gm;
-  const cleanedContent = content.replace(classPattern, '$1');
+  // Remove _XAMLBase from class inheritance (handles both old pattern with comma and new pattern without)
+  // Old pattern: class MyDialog(_XAMLBase, forms.WPFWindow):
+  // New pattern: class MyDialog(_XAMLBase):
+  const classPatternWithComma = /^(class\s+\w+\s*\()_XAMLBase,\s*/gm;
+  let cleanedContent = content.replace(classPatternWithComma, '$1');
+
+  // Also handle the new pattern where _XAMLBase is the only base class
+  // We need to restore the original base class - but since we don't know it, just remove _XAMLBase
+  // Users may need to manually add back their base class if they remove annotations
+  const classPatternSingle = /^(class\s+\w+\s*\()_XAMLBase(\):)/gm;
+  cleanedContent = cleanedContent.replace(classPatternSingle, '$1object$2');
 
   if (cleanedContent !== content) {
     content = cleanedContent;
