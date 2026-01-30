@@ -2,6 +2,26 @@
 
 A VS Code extension that provides IntelliSense/autocomplete for WPF XAML elements in Python code. Designed for pyRevit and IronPython development.
 
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [How It Works](#how-it-works)
+- [Getting Started](#getting-started)
+  - [New pyRevit Project](#new-pyrevit-project-step-by-step)
+  - [Existing Project](#existing-project-step-by-step)
+  - [Using a Shared Base Class](#using-a-shared-base-class)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Supported WPF Controls](#supported-wpf-controls)
+- [Understanding TYPE_CHECKING and Static Analysis](#understanding-type_checking-and-static-analysis)
+- [How the Two Systems Work Together](#how-the-two-systems-work-together)
+- [Smart Inheritance Detection](#smart-inheritance-detection)
+- [Best Practices](#best-practices)
+- [Troubleshooting](#troubleshooting)
+- [Changelog](#changelog)
+
 ## Features
 
 - **Automatic stub generation**: Generates `.pyi` stub files with full type definitions for all XAML elements
