@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { XamlElement } from './xamlParser';
 
 /**
@@ -9,6 +10,61 @@ function getStubClassName(baseName: string): string {
     .split(/[-_\s]/)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join('') + 'Elements';
+}
+
+/**
+ * Check if a parent class already uses _XAMLBase in its inheritance.
+ * This prevents adding _XAMLBase to classes that inherit from a base class
+ * which already has _XAMLBase (like AutoSyncBase).
+ */
+function parentClassHasXAMLBase(
+  pyPath: string,
+  parentClassName: string
+): boolean {
+  // Skip checking for known WPF base classes
+  if (parentClassName === 'forms.WPFWindow' || parentClassName === 'WPFWindow') {
+    return false;
+  }
+
+  const content = fs.readFileSync(pyPath, 'utf-8');
+  const dir = path.dirname(pyPath);
+
+  // Find imports to locate parent class file
+  const importMatch = content.match(
+    new RegExp(`from\\s+([\\w.]+)\\s+import\\s+[^\\n]*\\b${parentClassName}\\b`)
+  );
+
+  if (!importMatch) {
+    // Parent class might be in same file - check for class definition
+    const classDefInSameFile = content.match(
+      new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
+    );
+    return !!classDefInSameFile;
+  }
+
+  // Resolve import path to actual file
+  const modulePath = importMatch[1];
+
+  // Try common locations: same dir, lib folder, parent dirs
+  const possiblePaths = [
+    path.join(dir, `${modulePath}.py`),
+    path.join(dir, '..', 'lib', `${modulePath}.py`),
+    path.join(dir, '..', '..', 'lib', `${modulePath}.py`),
+    path.join(dir, '..', '..', '..', 'lib', `${modulePath}.py`),
+  ];
+
+  for (const possiblePath of possiblePaths) {
+    if (fs.existsSync(possiblePath)) {
+      const parentContent = fs.readFileSync(possiblePath, 'utf-8');
+      // Check if parent class inherits from _XAMLBase
+      const hasXAMLBase = parentContent.match(
+        new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
+      );
+      return !!hasXAMLBase;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -47,6 +103,19 @@ export function injectTypeAnnotations(
     return false;
   }
 
+  // Get the existing inheritance from the class definition
+  const existingInheritance = classMatch[2].trim();
+  const firstParentClass = existingInheritance.split(',')[0].trim() || 'object';
+
+  // Check if parent class already has _XAMLBase (like AutoSyncBase)
+  // If so, skip this file entirely - the parent handles TYPE_CHECKING
+  if (parentClassHasXAMLBase(pyPath, firstParentClass)) {
+    return false;
+  }
+
+  // Determine if we're replacing WPFWindow or adding to existing inheritance
+  const isWPFWindow = firstParentClass === 'forms.WPFWindow' || firstParentClass === 'WPFWindow';
+
   // Add TYPE_CHECKING import if needed (IronPython compatible)
   if (!hasTypeChecking) {
     // Find the imports section
@@ -67,18 +136,17 @@ except ImportError:
     }
   }
 
-  // Get the existing base class from the class definition to use at runtime
-  // This avoids MRO conflicts by not having both object and WPFWindow in the inheritance chain
-  const existingBaseClass = classMatch[2].trim().split(',')[0].trim() || 'object';
+  // Determine what _XAMLBase should equal at runtime
+  // - If replacing WPFWindow: _XAMLBase = forms.WPFWindow (they're equivalent)
+  // - If adding to other inheritance: _XAMLBase = object (safe base for multiple inheritance)
+  const runtimeBaseClass = isWPFWindow ? firstParentClass : 'object';
 
   // Add the XAML base class import block before the class definition
-  // At runtime, _XAMLBase becomes the actual base class (e.g., forms.WPFWindow)
-  // This avoids the MRO error that occurs with (_XAMLBase, forms.WPFWindow) when _XAMLBase = object
   const xamlImportBlock = `
 if TYPE_CHECKING:
   from ${stubModuleName} import ${stubClassName} as _XAMLBase
 else:
-  _XAMLBase = ${existingBaseClass}
+  _XAMLBase = ${runtimeBaseClass}
 
 `;
 
@@ -93,20 +161,27 @@ else:
     }
   }
 
-  // Update the class definition to inherit only from _XAMLBase
-  // Since _XAMLBase becomes the actual base class at runtime, we don't need multiple inheritance
+  // Update the class definition based on the inheritance type
   // Need to re-match after potential content changes
   const updatedClassMatch = content.match(classPattern);
   if (updatedClassMatch) {
     const fullMatch = updatedClassMatch[0];
     const beforeParens = updatedClassMatch[1];
-    const inheritance = updatedClassMatch[2];
+    const inheritance = updatedClassMatch[2].trim();
     const afterParens = updatedClassMatch[3];
 
-    // Only modify if not already using _XAMLBase
+    // Skip if already using _XAMLBase
     if (!inheritance.includes('_XAMLBase')) {
-      // Replace inheritance with just _XAMLBase to avoid MRO conflicts
-      const newClassDef = `${beforeParens}_XAMLBase${afterParens}`;
+      let newClassDef: string;
+
+      if (isWPFWindow) {
+        // Replace WPFWindow with _XAMLBase (they're equivalent at runtime)
+        newClassDef = `${beforeParens}_XAMLBase${afterParens}`;
+      } else {
+        // Add _XAMLBase to the beginning of existing inheritance
+        newClassDef = `${beforeParens}_XAMLBase, ${inheritance}${afterParens}`;
+      }
+
       content = content.replace(fullMatch, newClassDef);
       modified = true;
     }

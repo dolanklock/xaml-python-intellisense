@@ -104,6 +104,239 @@ The extension automatically adds these settings to your workspace:
 }
 ```
 
+## Getting Started
+
+### New pyRevit Project (Step-by-Step)
+
+Follow these steps to set up IntelliSense in a new pyRevit project:
+
+#### Step 1: Create Your Project Structure
+
+```
+my-tools.extension/
+├── MyTools.tab/
+│   └── MyPanel.panel/
+│       └── MyButton.pushbutton/
+│           ├── script.py
+│           └── UI/
+│               └── MainWindow.xaml
+└── lib/
+```
+
+#### Step 2: Create Your XAML File
+
+Create `UI/MainWindow.xaml` with named elements using `x:Name`:
+
+```xml
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="My Dialog" Height="300" Width="400">
+    <StackPanel Margin="10">
+        <TextBlock Text="Select a project:" Margin="0,0,0,5"/>
+        <ComboBox x:Name="project_combobox" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Enter name:" Margin="0,0,0,5"/>
+        <TextBox x:Name="name_textbox" Margin="0,0,0,10"/>
+
+        <CheckBox x:Name="include_checkbox" Content="Include details" Margin="0,0,0,10"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="ok_button" Content="OK" Width="75" Margin="0,0,10,0"/>
+            <Button x:Name="cancel_button" Content="Cancel" Width="75"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
+```
+
+#### Step 3: Create Your Python File
+
+Create `script.py` with a basic WPFWindow class:
+
+```python
+from pyrevit import forms
+
+class MyDialog(forms.WPFWindow):
+    def __init__(self):
+        forms.WPFWindow.__init__(self, 'UI/MainWindow.xaml')
+
+    def ok_button_click(self, sender, args):
+        self.Close()
+
+# Show the dialog
+dialog = MyDialog()
+dialog.ShowDialog()
+```
+
+#### Step 4: Save the XAML File
+
+**Save `MainWindow.xaml`** and the extension will automatically:
+
+1. ✅ Create `typings/` folder at your workspace root
+2. ✅ Generate `typings/_MainWindow_xaml.py` stub file
+3. ✅ Copy `wpf_helpers.py` to your `lib/` folder
+4. ✅ Inject TYPE_CHECKING boilerplate into `script.py`
+5. ✅ Configure VS Code settings
+
+Your `script.py` is now transformed to:
+
+```python
+from pyrevit import forms
+from wpf_helpers import setup_element_groups
+
+# IronPython doesn't have typing module, so we handle it gracefully
+try:
+  from typing import TYPE_CHECKING
+except ImportError:
+  TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+  from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+  _XAMLBase = forms.WPFWindow
+
+class MyDialog(_XAMLBase):
+    def __init__(self):
+        forms.WPFWindow.__init__(self, 'UI/MainWindow.xaml')
+        setup_element_groups(self)
+
+    def ok_button_click(self, sender, args):
+        self.Close()
+```
+
+#### Step 5: Enjoy IntelliSense!
+
+Now when you type `self.` you'll see all your XAML elements with full autocomplete:
+
+```python
+def setup_ui(self):
+    # Direct element access
+    self.project_combobox.ItemsSource = ['Project A', 'Project B']
+    self.name_textbox.Text = "Default"
+    self.include_checkbox.IsChecked = True
+
+    # Type group access
+    self.ComboBox.project_combobox.SelectedIndex = 0
+    self.Button.ok_button.IsEnabled = False
+```
+
+---
+
+### Existing Project (Step-by-Step)
+
+Already have a pyRevit project with XAML files? Here's how to add IntelliSense:
+
+#### Step 1: Install the Extension
+
+1. Download the `.vsix` file from [releases](https://github.com/dolanklock/xaml-python-intellisense/releases)
+2. In VS Code: Extensions → `...` menu → **Install from VSIX**
+3. Reload VS Code
+
+#### Step 2: Open Your Project
+
+Open your pyRevit extension folder in VS Code (the folder containing `.extension`).
+
+#### Step 3: Generate Stubs
+
+Run the command: **Cmd/Ctrl+Shift+P** → `XAML: Generate Python Stubs`
+
+This will:
+- Scan all `.xaml` files in your workspace
+- Generate stub files in `typings/`
+- Inject TYPE_CHECKING into Python files that use XAML
+
+#### Step 4: Check Your Python Files
+
+The extension automatically handles different inheritance patterns:
+
+**If your class inherits from `forms.WPFWindow`:**
+```python
+# BEFORE
+class MyDialog(forms.WPFWindow):
+    ...
+
+# AFTER (auto-transformed)
+class MyDialog(_XAMLBase):  # _XAMLBase = forms.WPFWindow at runtime
+    ...
+```
+
+**If you use a base class that already has `_XAMLBase` (like AutoSyncBase):**
+```python
+# The extension detects this and skips the file!
+# No changes are made - the parent class handles TYPE_CHECKING
+class EditDialog(AutoSyncBase):
+    ...
+```
+
+#### Step 5: Verify IntelliSense
+
+Open a Python file that uses XAML, type `self.` and you should see your XAML elements in the autocomplete list.
+
+**Not working?** Check the [Troubleshooting](#troubleshooting) section.
+
+---
+
+### Using a Shared Base Class
+
+> **Recommended Pattern:** This is the recommended approach for projects with multiple dialogs. It keeps your code DRY and makes child dialogs clean and simple.
+
+For larger projects, create a shared base class that all dialogs inherit from. This avoids repeating the TYPE_CHECKING boilerplate in every file.
+
+#### Step 1: Create Your Base Class
+
+Create `lib/MyBaseDialog.py`:
+
+```python
+import os
+from pyrevit import forms
+from wpf_helpers import setup_element_groups
+
+# IronPython doesn't have typing module, so we handle it gracefully
+try:
+  from typing import TYPE_CHECKING
+except ImportError:
+  TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+  from _BaseDialog_xaml import BaseDialogElements as _XAMLBase
+else:
+  _XAMLBase = forms.WPFWindow
+
+class MyBaseDialog(_XAMLBase):
+    """Base class for all dialogs in this extension."""
+
+    def __init__(self, xaml_file):
+        # Get the directory of the calling script
+        script_dir = os.path.dirname(__file__)
+        xaml_path = os.path.join(script_dir, xaml_file)
+        forms.WPFWindow.__init__(self, xaml_path)
+        setup_element_groups(self)
+
+    def show(self):
+        """Show the dialog and return the result."""
+        return self.ShowDialog()
+```
+
+#### Step 2: Create Child Dialogs
+
+Your child dialogs are now simple - no TYPE_CHECKING needed:
+
+```python
+# edit_dialog.py
+from MyBaseDialog import MyBaseDialog
+
+class EditDialog(MyBaseDialog):
+    def __init__(self):
+        MyBaseDialog.__init__(self, 'UI/EditDialog.xaml')
+        self.setup_ui()
+
+    def setup_ui(self):
+        # IntelliSense works! (inherited from base class)
+        self.name_textbox.Text = "Edit me"
+        self.save_button.Click += self.on_save
+```
+
+The extension **automatically detects** that `EditDialog` inherits from `MyBaseDialog` which already has `_XAMLBase`, and **skips injecting** the TYPE_CHECKING boilerplate.
+
 ## Usage
 
 ### Automatic Mode (Default)
@@ -300,6 +533,273 @@ else:
 
 Think of stub files like a dictionary the IDE consults - it reads them to know "this dialog has a button called `my_button` with these properties" without ever running any code.
 
+## How the Two Systems Work Together
+
+This extension uses **two parallel systems** that mirror each other - one for the IDE, one for runtime:
+
+| System | When it runs | What it provides |
+|--------|--------------|------------------|
+| **Stub files** (`typings/`) | IDE analysis time | Tells Pylance what elements exist and their types |
+| **wpf_helpers.py** | Runtime in Revit | Actually creates the element accessors on your window |
+
+### Why Two Systems?
+
+The stub files are **never imported at runtime** - they only exist for the IDE. So we need something to make `self.Button.my_button` actually work when Revit runs your code.
+
+That's what `setup_element_groups(self)` does.
+
+### The Runtime Flow
+
+```python
+class MyDialog(_XAMLBase):
+    def __init__(self):
+        forms.WPFWindow.__init__(self, 'UI/MainWindow.xaml')
+        setup_element_groups(self)  # ← This creates self.Button, self.ComboBox, etc.
+
+        # Now this works:
+        self.Button.my_button.Content = "Click me"
+```
+
+When `setup_element_groups(self)` runs, it:
+
+1. **Introspects** the WPF window to find all named XAML elements
+2. **Groups them by type** (all Buttons together, all ComboBoxes together, etc.)
+3. **Creates `ElementGroup` objects** and attaches them to `self`
+
+After this call:
+- `self.Button` exists (contains all Button elements)
+- `self.Button.my_button` returns the actual WPF Button
+- `self.ComboBox.project_combo` returns the actual WPF ComboBox
+
+### Side-by-Side Comparison
+
+**What the stub file says (for IDE):**
+```python
+# typings/_MainWindow_xaml.py (auto-generated)
+class _ButtonGroup:
+    my_button: _ButtonType
+    ok_button: _ButtonType
+
+class MainWindowElements:
+    Button: _ButtonGroup
+```
+
+**What wpf_helpers creates (at runtime):**
+```python
+# After setup_element_groups(self) runs:
+self.Button = ElementGroup(...)  # Contains my_button, ok_button
+self.Button.my_button  # Returns actual WPF Button from the window
+```
+
+The stub describes the **shape** of the data. The wpf_helpers **creates** that shape at runtime.
+
+### The Complete Picture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         YOUR CODE                                │
+│  class MyDialog(_XAMLBase):                                      │
+│      def __init__(self):                                         │
+│          forms.WPFWindow.__init__(self, 'MainWindow.xaml')       │
+│          setup_element_groups(self)                              │
+│          self.Button.my_button.Content = "Hello"                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+           ┌──────────────────┴──────────────────┐
+           ▼                                     ▼
+┌─────────────────────────┐         ┌─────────────────────────┐
+│   IDE ANALYSIS TIME     │         │   RUNTIME (REVIT)       │
+├─────────────────────────┤         ├─────────────────────────┤
+│ TYPE_CHECKING = True    │         │ TYPE_CHECKING = False   │
+│                         │         │                         │
+│ _XAMLBase = stub class  │         │ _XAMLBase = WPFWindow   │
+│ (MainWindowElements)    │         │                         │
+│                         │         │ setup_element_groups()  │
+│ Stub file tells IDE:    │         │ creates self.Button,    │
+│ "self.Button.my_button  │         │ self.ComboBox, etc.     │
+│  is a Button with       │         │ from actual XAML        │
+│  .Content, .Click..."   │         │ elements                │
+│                         │         │                         │
+│ ➜ IntelliSense works!   │         │ ➜ Code runs correctly!  │
+└─────────────────────────┘         └─────────────────────────┘
+```
+
+### Key Insight
+
+The stub files and wpf_helpers are **mirrors** of each other:
+- **Stubs** = documentation for the IDE (static, generated from XAML)
+- **wpf_helpers** = runtime implementation (dynamic, reads from live WPF window)
+
+They must stay in sync - which is why the extension generates both from the same XAML file.
+
+## Smart Inheritance Detection
+
+The extension intelligently handles different class inheritance patterns. It automatically detects what your class inherits from and takes the appropriate action.
+
+### How It Works
+
+When the extension finds a Python file that uses XAML, it checks the class inheritance:
+
+| Your Class Inherits From | What Extension Does |
+|--------------------------|---------------------|
+| `forms.WPFWindow` or `WPFWindow` | **Replaces** with `_XAMLBase` |
+| A class that already has `_XAMLBase` | **Skips** the file entirely |
+| Something else | **Adds** `_XAMLBase` to inheritance |
+
+### Pattern 1: Direct WPFWindow (Most Common)
+
+This is the typical case for simple dialogs:
+
+```python
+# BEFORE (what you write)
+class MyDialog(forms.WPFWindow):
+    def __init__(self):
+        forms.WPFWindow.__init__(self, 'UI/MainWindow.xaml')
+```
+
+```python
+# AFTER (auto-transformed by extension)
+if TYPE_CHECKING:
+  from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+  _XAMLBase = forms.WPFWindow  # Same as before at runtime!
+
+class MyDialog(_XAMLBase):
+    def __init__(self):
+        forms.WPFWindow.__init__(self, 'UI/MainWindow.xaml')
+        setup_element_groups(self)
+```
+
+**At runtime:** `_XAMLBase = forms.WPFWindow`, so your class still inherits from `forms.WPFWindow` - no behavior change!
+
+### Pattern 2: Base Class Already Has _XAMLBase
+
+If you have a shared base class (like `AutoSyncBase`) that already uses `_XAMLBase`, the extension **detects this and skips the child file entirely**:
+
+```python
+# lib/AutoSyncBase.py - Base class with _XAMLBase
+if TYPE_CHECKING:
+  from _AutoSync_xaml import AutoSyncElements as _XAMLBase
+else:
+  _XAMLBase = forms.WPFWindow
+
+class AutoSyncBase(_XAMLBase):
+    """Shared base class for all AutoSync dialogs."""
+    ...
+```
+
+```python
+# edit_dialog.py - Child class
+from AutoSyncBase import AutoSyncBase
+
+# Extension sees AutoSyncBase already has _XAMLBase
+# NO CHANGES MADE - this file is skipped!
+class EditDialog(AutoSyncBase):
+    def __init__(self):
+        AutoSyncBase.__init__(self, 'UI/EditDialog.xaml')
+        # IntelliSense still works through inheritance!
+        self.save_button.Click += self.on_save
+```
+
+**Why this works:** The IDE follows the inheritance chain. `EditDialog` → `AutoSyncBase` → `_XAMLBase` → stub class. IntelliSense flows down through the chain.
+
+### Pattern 3: Custom Inheritance
+
+If your class inherits from something other than WPFWindow (and that class doesn't have `_XAMLBase`), the extension adds `_XAMLBase` to the inheritance:
+
+```python
+# BEFORE
+class MyDialog(SomeOtherMixin):
+    ...
+```
+
+```python
+# AFTER (auto-transformed)
+if TYPE_CHECKING:
+  from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+  _XAMLBase = object  # Safe base for multiple inheritance
+
+class MyDialog(_XAMLBase, SomeOtherMixin):
+    ...
+```
+
+**At runtime:** `_XAMLBase = object`, so the effective inheritance is just `SomeOtherMixin` (since `object` is already at the base of everything).
+
+### Detection Logic
+
+The extension checks if a parent class has `_XAMLBase` by:
+
+1. **Same file:** Checks if the parent class is defined in the same file with `_XAMLBase` in its inheritance
+2. **Imported class:** Finds the import statement, locates the source file (checking `lib/` folders), and scans for `_XAMLBase`
+
+```
+my-tools.extension/
+├── lib/
+│   └── AutoSyncBase.py    ← Extension checks here for _XAMLBase
+└── MyTool.tab/
+    └── MyPanel.panel/
+        └── MyButton.pushbutton/
+            └── edit_dialog.py  ← Inherits from AutoSyncBase
+```
+
+## Best Practices
+
+### 1. Use a Shared Base Class (Recommended)
+
+For projects with more than 2-3 dialogs, create a shared base class that handles:
+- TYPE_CHECKING boilerplate
+- XAML loading
+- `setup_element_groups()` call
+
+**Benefits:**
+- Child dialogs have zero boilerplate
+- Single place to update if patterns change
+- Extension auto-detects and skips child files
+
+See [Using a Shared Base Class](#using-a-shared-base-class) for setup instructions.
+
+### 2. Keep XAML Files Near Python Files
+
+Recommended structure:
+```
+MyButton.pushbutton/
+├── script.py
+├── my_dialog.py
+└── UI/
+    └── MainWindow.xaml
+```
+
+The extension searches the XAML file's directory and parent directory for Python files. Keeping them close together ensures reliable auto-detection.
+
+### 3. Use Descriptive x:Name Attributes
+
+**Good naming:**
+```xml
+<ComboBox x:Name="project_combobox"/>
+<Button x:Name="save_button"/>
+<TextBox x:Name="search_textbox"/>
+```
+
+**Avoid:**
+```xml
+<ComboBox x:Name="cb1"/>
+<Button x:Name="btn"/>
+<TextBox x:Name="txt"/>
+```
+
+Clear, descriptive names make IntelliSense suggestions more useful and your code more readable.
+
+### 4. Don't Commit the typings/ Folder
+
+The `typings/` folder contains auto-generated stub files. Add it to `.gitignore`:
+
+```
+typings/
+```
+
+The extension will regenerate stubs when teammates open the project.
+
 ## Troubleshooting
 
 ### Autocomplete not working?
@@ -367,6 +867,15 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.7.0
+- **Smart inheritance detection** - Extension now intelligently handles different inheritance patterns
+- Automatically detects if parent class already has `_XAMLBase` and skips injection
+- Supports shared base class patterns (like AutoSyncBase) - child classes need no boilerplate
+- For `forms.WPFWindow`: replaces with `_XAMLBase` (equivalent at runtime)
+- For custom classes: adds `_XAMLBase` to inheritance list
+- Added comprehensive "Getting Started" guides for new and existing projects
+- Added "Smart Inheritance Detection" documentation with examples
 
 ### v0.6.0
 - **Automatic type group support** - `self.ComboBox.element_name`, `self.Button.element_name` patterns now work automatically
