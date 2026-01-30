@@ -234,6 +234,72 @@ This approach:
 - ✅ **MRO compatible** - avoids inheritance conflicts with WPFWindow
 - ✅ **Type group access** - use `self.ComboBox.element_name` patterns
 
+## Understanding TYPE_CHECKING and Static Analysis
+
+### How Does IntelliSense Work Without Running Code?
+
+When you're coding, **nothing actually runs**. Your IDE (VS Code with Pylance) uses **static analysis** - it reads and analyzes your Python files as text without executing them.
+
+### The TYPE_CHECKING Constant
+
+`TYPE_CHECKING` is a special constant from Python's `typing` module:
+- **Type checkers/IDEs** treat it as `True` during analysis
+- **At runtime** it's always `False`
+
+This lets you write imports that only exist for the IDE, not for your actual program.
+
+### Why the try/except Pattern?
+
+**IronPython** (what pyRevit runs on inside Revit) doesn't have the `typing` module at all:
+
+| Environment | What Happens |
+|-------------|--------------|
+| **VS Code (Pylance/CPython)** | `from typing import TYPE_CHECKING` succeeds, treated as `True` |
+| **Revit (IronPython)** | Import fails, we set `TYPE_CHECKING = False` as fallback |
+
+```python
+# Works in CPython (VS Code), fails gracefully in IronPython (Revit)
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False
+```
+
+### The Complete Flow
+
+Here's what happens when you type `self.my_button.` in VS Code:
+
+```
+You type: self.my_button.
+              ↓
+IDE's static analyzer reads your file (no execution)
+              ↓
+Sees TYPE_CHECKING block, treats it as True
+              ↓
+Follows the import: from _MainWindow_xaml import MainWindowElements
+              ↓
+Reads typings/_MainWindow_xaml.py stub file
+              ↓
+Finds my_button is a Button with .Content, .IsEnabled, .Click, etc.
+              ↓
+Shows you intellisense suggestions
+```
+
+### Runtime vs Analysis
+
+```python
+if TYPE_CHECKING:
+    # IDE follows this path (TYPE_CHECKING = True during analysis)
+    from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+    # Revit follows this path (TYPE_CHECKING = False at runtime)
+    _XAMLBase = forms.WPFWindow
+```
+
+**Key insight**: The stub files in `typings/` are never imported at runtime. They're just documentation that tells the IDE what properties and methods your XAML elements have.
+
+Think of stub files like a dictionary the IDE consults - it reads them to know "this dialog has a button called `my_button` with these properties" without ever running any code.
+
 ## Troubleshooting
 
 ### Autocomplete not working?
