@@ -76,6 +76,21 @@ When you save a XAML file, the extension automatically:
 6. **Injects type annotations** into your Python class automatically
 7. **For pyRevit**: Auto-detects `.extension` folders and copies `wpf_helpers.py` to the `lib/` folder for runtime support
 
+### Auto-Injection Behavior
+
+The extension checks whether your Python file already has the TYPE_CHECKING boilerplate before injecting. Here's how it decides:
+
+| Scenario | What happens on XAML save |
+|----------|---------------------------|
+| File has `_XAMLBase` anywhere in it | **Skipped** - assumes already set up |
+| File has no `_XAMLBase` but class inherits from `forms.WPFWindow` | **Injects** - adds full boilerplate |
+| Parent class already has `_XAMLBase` (e.g., shared base class) | **Skipped** - parent handles it |
+
+**What this means:**
+- If you manually remove just the `try/except TYPE_CHECKING` block but keep `_XAMLBase` in your class definition, the extension will **not** re-add it
+- If you remove **everything** (revert to `class MyDialog(forms.WPFWindow):` with no `_XAMLBase`), the extension **will** re-inject on the next XAML save
+- To permanently prevent auto-injection for a file, either keep `_XAMLBase` in the file or set `xamlPythonIntellisense.autoInjectAnnotations` to `false` in settings
+
 ### Project Structure After Setup
 
 **Standard Python project:**
