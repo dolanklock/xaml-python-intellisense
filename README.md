@@ -45,22 +45,24 @@ Before using this extension, ensure you have:
 
 ## Installation
 
-### From VSIX (Local Install)
-
-1. Download the `.vsix` file from [releases](https://github.com/dolanklock/xaml-python-intellisense/releases)
-2. In VS Code: Extensions → `...` menu → **Install from VSIX**
-3. Select the downloaded file
-4. Reload VS Code
-
 ### From Source
 
-```bash
-git clone https://github.com/dolanklock/xaml-python-intellisense
-cd xaml-python-intellisense
-npm install
-npm run package
-# Install the generated .vsix file in VS Code
-```
+1. Clone and build the extension:
+   ```bash
+   git clone https://github.com/dolanklock/xaml-python-intellisense
+   cd xaml-python-intellisense
+   npm install
+   npm run package
+   ```
+
+2. Install the generated `.vsix` file in VS Code:
+   - Open VS Code
+   - Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+   - Click the `...` menu (top-right of Extensions panel)
+   - Select **Install from VSIX...**
+   - Navigate to the cloned folder and select the generated `.vsix` file
+   - Click **Install**
+   - Reload VS Code when prompted
 
 ## How It Works
 
@@ -130,7 +132,11 @@ The extension automatically adds these settings to your workspace:
 
 Follow these steps to set up IntelliSense in a new pyRevit project:
 
-#### Step 1: Create Your Project Structure
+#### Step 1: Install the Extension
+
+Follow the [Installation](#installation) instructions above to build and install the extension.
+
+#### Step 2: Create Your Project Structure
 
 ```
 my-tools.extension/
@@ -143,7 +149,7 @@ my-tools.extension/
 └── lib/
 ```
 
-#### Step 2: Create Your XAML File
+#### Step 3: Create Your XAML File
 
 Create `UI/MainWindow.xaml` with named elements using `x:Name`:
 
@@ -168,7 +174,7 @@ Create `UI/MainWindow.xaml` with named elements using `x:Name`:
 </Window>
 ```
 
-#### Step 3: Create Your Python File
+#### Step 4: Create Your Python File
 
 Create `script.py` with a basic WPFWindow class:
 
@@ -187,7 +193,7 @@ dialog = MyDialog()
 dialog.ShowDialog()
 ```
 
-#### Step 4: Save the XAML File
+#### Step 5: Save the XAML File
 
 **Save `MainWindow.xaml`** and the extension will automatically:
 
@@ -223,7 +229,7 @@ class MyDialog(_XAMLBase):
         self.Close()
 ```
 
-#### Step 5: Enjoy IntelliSense!
+#### Step 6: Enjoy IntelliSense!
 
 Now when you type `self.` you'll see all your XAML elements with full autocomplete:
 
@@ -247,9 +253,7 @@ Already have a pyRevit project with XAML files? Here's how to add IntelliSense:
 
 #### Step 1: Install the Extension
 
-1. Download the `.vsix` file from [releases](https://github.com/dolanklock/xaml-python-intellisense/releases)
-2. In VS Code: Extensions → `...` menu → **Install from VSIX**
-3. Reload VS Code
+Follow the [Installation](#installation) instructions above to build and install the extension.
 
 #### Step 2: Open Your Project
 
