@@ -13,19 +13,9 @@ function getStubClassName(baseName: string): string {
 }
 
 /**
- * Check if a parent class already uses _XAMLBase in its inheritance.
- * This prevents adding _XAMLBase to classes that inherit from a base class
- * which already has _XAMLBase (like AutoSyncBase).
+ * Find the parent class file path given an import statement
  */
-function parentClassHasXAMLBase(
-  pyPath: string,
-  parentClassName: string
-): boolean {
-  // Skip checking for known WPF base classes
-  if (parentClassName === 'forms.WPFWindow' || parentClassName === 'WPFWindow') {
-    return false;
-  }
-
+function findParentClassFile(pyPath: string, parentClassName: string): string | null {
   const content = fs.readFileSync(pyPath, 'utf-8');
   const dir = path.dirname(pyPath);
 
@@ -35,11 +25,14 @@ function parentClassHasXAMLBase(
   );
 
   if (!importMatch) {
-    // Parent class might be in same file - check for class definition
+    // Parent class might be in same file
     const classDefInSameFile = content.match(
-      new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
+      new RegExp(`class\\s+${parentClassName}\\s*\\(`)
     );
-    return !!classDefInSameFile;
+    if (classDefInSameFile) {
+      return pyPath; // Parent is in same file
+    }
+    return null;
   }
 
   // Resolve import path to actual file
@@ -55,16 +48,224 @@ function parentClassHasXAMLBase(
 
   for (const possiblePath of possiblePaths) {
     if (fs.existsSync(possiblePath)) {
-      const parentContent = fs.readFileSync(possiblePath, 'utf-8');
-      // Check if parent class inherits from _XAMLBase
-      const hasXAMLBase = parentContent.match(
-        new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
-      );
-      return !!hasXAMLBase;
+      return possiblePath;
     }
   }
 
-  return false;
+  return null;
+}
+
+/**
+ * Check if a parent class already uses _XAMLBase in its inheritance.
+ * This prevents adding _XAMLBase to classes that inherit from a base class
+ * which already has _XAMLBase (like AutoSyncBase).
+ */
+function parentClassHasXAMLBase(
+  pyPath: string,
+  parentClassName: string
+): boolean {
+  // Skip checking for known WPF base classes
+  if (parentClassName === 'forms.WPFWindow' || parentClassName === 'WPFWindow') {
+    return false;
+  }
+
+  const parentFile = findParentClassFile(pyPath, parentClassName);
+  if (!parentFile) {
+    return false;
+  }
+
+  const parentContent = fs.readFileSync(parentFile, 'utf-8');
+  // Check if parent class inherits from _XAMLBase
+  const hasXAMLBase = parentContent.match(
+    new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
+  );
+  return !!hasXAMLBase;
+}
+
+/**
+ * Get which XAML file the parent's _XAMLBase comes from.
+ * Returns the XAML base name (e.g., "MainWindow") or null if not found.
+ */
+function getParentXamlFile(pyPath: string, parentClassName: string): string | null {
+  // Skip checking for known WPF base classes
+  if (parentClassName === 'forms.WPFWindow' || parentClassName === 'WPFWindow') {
+    return null;
+  }
+
+  const parentFile = findParentClassFile(pyPath, parentClassName);
+  if (!parentFile) {
+    return null;
+  }
+
+  const parentContent = fs.readFileSync(parentFile, 'utf-8');
+
+  // Check if parent class inherits from _XAMLBase
+  const hasXAMLBase = parentContent.match(
+    new RegExp(`class\\s+${parentClassName}\\s*\\([^)]*_XAMLBase[^)]*\\)`)
+  );
+
+  if (!hasXAMLBase) {
+    return null;
+  }
+
+  // Find the XAML file from the TYPE_CHECKING import
+  // Pattern: from _MainWindow_xaml import ... as _XAMLBase
+  const xamlImportMatch = parentContent.match(
+    /from\s+_(\w+)_xaml\s+import\s+\w+\s+as\s+_XAMLBase/
+  );
+
+  if (xamlImportMatch) {
+    return xamlImportMatch[1]; // Returns "MainWindow" from "_MainWindow_xaml"
+  }
+
+  return null;
+}
+
+/**
+ * Get which XAML file a class loads by parsing load_xaml/loadXAML calls
+ * and class attributes like xaml_content.
+ * Returns the XAML base name (e.g., "Analyze") or null if not found.
+ */
+function getXamlFileFromLoadCall(content: string, className: string): string | null {
+  // Pattern 1: Direct string in load_xaml call
+  // self.load_xaml("./UI/Analyze.xaml") or self.loadXAML("UI/Analyze.xaml")
+  const loadXamlMatch = content.match(
+    /self\.(?:load_xaml|loadXAML)\s*\(\s*["']([^"']+\.xaml)["']/
+  );
+  if (loadXamlMatch) {
+    const xamlPath = loadXamlMatch[1];
+    const baseName = path.basename(xamlPath, '.xaml');
+    return baseName;
+  }
+
+  // Pattern 2: Class attribute reference
+  // xaml_content = "./UI/Analyze.xaml" then self.loadXAML(ClassName.xaml_content)
+  // or xaml_content = "./UI/Analyze.xaml" then self.load_xaml(xaml_content)
+
+  // First, find if there's a loadXAML call using a variable/attribute
+  const loadXamlVarMatch = content.match(
+    /self\.(?:load_xaml|loadXAML)\s*\(\s*(?:self\.|[\w]+\.)?(\w+)\s*\)/
+  );
+
+  if (loadXamlVarMatch) {
+    const varName = loadXamlVarMatch[1];
+
+    // Look for the variable definition in the class
+    // Pattern: xaml_content = "./UI/Analyze.xaml" or xaml_content = "Analyze.xaml"
+    const varDefMatch = content.match(
+      new RegExp(`${varName}\\s*=\\s*["']([^"']+\\.xaml)["']`)
+    );
+
+    if (varDefMatch) {
+      const xamlPath = varDefMatch[1];
+      const baseName = path.basename(xamlPath, '.xaml');
+      return baseName;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Inject TYPE_CHECKING annotations for a child class that has a parent with _XAMLBase
+ * but loads a DIFFERENT XAML file.
+ */
+function injectChildClassAnnotations(
+  pyPath: string,
+  className: string,
+  xamlBaseName: string,
+  parentClassName: string
+): boolean {
+  let content = fs.readFileSync(pyPath, 'utf-8');
+  let modified = false;
+
+  // Generate unique base name for this child: _AnalyzeXAMLBase
+  const uniqueBaseName = `_${xamlBaseName}XAMLBase`;
+  const stubModuleName = `_${xamlBaseName}_xaml`;
+  const stubClassName = getStubClassName(xamlBaseName);
+
+  // Check if this unique base already exists
+  if (content.includes(uniqueBaseName)) {
+    return false; // Already set up
+  }
+
+  // Check if TYPE_CHECKING import exists
+  const hasTypeChecking = content.includes('TYPE_CHECKING') || content.includes('TYPE_CHECKING = False');
+
+  // Add TYPE_CHECKING import if needed (IronPython compatible)
+  if (!hasTypeChecking) {
+    const lastImportMatch = content.match(/^(import .+|from .+ import .+)$/gm);
+    if (lastImportMatch) {
+      const lastImport = lastImportMatch[lastImportMatch.length - 1];
+      const insertPos = content.indexOf(lastImport) + lastImport.length;
+      const typeCheckingImport = `
+
+# IronPython doesn't have typing module, so we handle it gracefully
+try:
+  from typing import TYPE_CHECKING
+except ImportError:
+  TYPE_CHECKING = False`;
+      content = content.slice(0, insertPos) + typeCheckingImport + content.slice(insertPos);
+      modified = true;
+    }
+  }
+
+  // Add the child-specific XAML base import block before the class definition
+  // At runtime, inherit from actual parent class; at type-check time, use XAML elements
+  const xamlImportBlock = `
+if TYPE_CHECKING:
+  from ${stubModuleName} import ${stubClassName} as ${uniqueBaseName}
+else:
+  ${uniqueBaseName} = ${parentClassName}
+
+`;
+
+  // Find position to insert (before the class definition)
+  const classIndex = content.search(new RegExp(`^class\\s+${className}\\s*\\(`, 'm'));
+  if (classIndex !== -1) {
+    // Check if import block already exists nearby
+    const beforeClass = content.slice(Math.max(0, classIndex - 300), classIndex);
+    if (!beforeClass.includes(uniqueBaseName)) {
+      content = content.slice(0, classIndex) + xamlImportBlock + content.slice(classIndex);
+      modified = true;
+    }
+  }
+
+  // Update the class definition to use the unique base
+  const classPattern = new RegExp(`^(class\\s+${className}\\s*\\()([^)]*)(\\):)`, 'm');
+  const classMatch = content.match(classPattern);
+
+  if (classMatch) {
+    const fullMatch = classMatch[0];
+    const beforeParens = classMatch[1];
+    const inheritance = classMatch[2].trim();
+    const afterParens = classMatch[3];
+
+    // Skip if already using the unique base
+    if (!inheritance.includes(uniqueBaseName)) {
+      // Replace the parent class with our unique base
+      // e.g., "AutoSyncBase" becomes "_AnalyzeXAMLBase"
+      const newInheritance = inheritance.replace(
+        new RegExp(`\\b${parentClassName}\\b`),
+        uniqueBaseName
+      );
+
+      if (newInheritance !== inheritance) {
+        const newClassDef = `${beforeParens}${newInheritance}${afterParens}`;
+        content = content.replace(fullMatch, newClassDef);
+        modified = true;
+      }
+    }
+  }
+
+  // NOTE: We do NOT add setup_element_groups(self) here because the parent class
+  // (e.g., AutoSyncBase) already calls it in its loadXAML method.
+
+  if (modified) {
+    fs.writeFileSync(pyPath, content, 'utf-8');
+  }
+
+  return modified;
 }
 
 /**
@@ -108,8 +309,18 @@ export function injectTypeAnnotations(
   const firstParentClass = existingInheritance.split(',')[0].trim() || 'object';
 
   // Check if parent class already has _XAMLBase (like AutoSyncBase)
-  // If so, skip this file entirely - the parent handles TYPE_CHECKING
-  if (parentClassHasXAMLBase(pyPath, firstParentClass)) {
+  const parentXamlFile = getParentXamlFile(pyPath, firstParentClass);
+
+  if (parentXamlFile) {
+    // Parent has _XAMLBase - check if this child uses a DIFFERENT XAML file
+    const childXamlFile = getXamlFileFromLoadCall(content, className);
+
+    if (childXamlFile && childXamlFile.toLowerCase() !== parentXamlFile.toLowerCase()) {
+      // Child loads a different XAML - inject child-specific annotations
+      return injectChildClassAnnotations(pyPath, className, childXamlFile, firstParentClass);
+    }
+
+    // Same XAML or no XAML load found - skip (parent handles it)
     return false;
   }
 

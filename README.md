@@ -84,7 +84,8 @@ The extension checks whether your Python file already has the TYPE_CHECKING boil
 |----------|---------------------------|
 | File has `_XAMLBase` anywhere in it | **Skipped** - assumes already set up |
 | File has no `_XAMLBase` but class inherits from `forms.WPFWindow` | **Injects** - adds full boilerplate |
-| Parent class already has `_XAMLBase` (e.g., shared base class) | **Skipped** - parent handles it |
+| Parent class has `_XAMLBase`, child loads **same** XAML | **Skipped** - parent handles it |
+| Parent class has `_XAMLBase`, child loads **different** XAML | **Injects child-specific** - adds unique `_<XamlName>XAMLBase` |
 
 **What this means:**
 - If you manually remove just the `try/except TYPE_CHECKING` block but keep `_XAMLBase` in your class definition, the extension will **not** re-add it
@@ -711,9 +712,9 @@ class MyDialog(_XAMLBase):
 
 **At runtime:** `_XAMLBase = forms.WPFWindow`, so your class still inherits from `forms.WPFWindow` - no behavior change!
 
-### Pattern 2: Base Class Already Has _XAMLBase
+### Pattern 2: Base Class Already Has _XAMLBase (Same XAML)
 
-If you have a shared base class (like `AutoSyncBase`) that already uses `_XAMLBase`, the extension **detects this and skips the child file entirely**:
+If you have a shared base class (like `AutoSyncBase`) that already uses `_XAMLBase`, and the child class uses the **same XAML file** (or no specific XAML), the extension **detects this and skips the child file entirely**:
 
 ```python
 # lib/AutoSyncBase.py - Base class with _XAMLBase
@@ -728,21 +729,89 @@ class AutoSyncBase(_XAMLBase):
 ```
 
 ```python
-# edit_dialog.py - Child class
+# edit_dialog.py - Child class using same XAML or no specific XAML
 from AutoSyncBase import AutoSyncBase
 
 # Extension sees AutoSyncBase already has _XAMLBase
 # NO CHANGES MADE - this file is skipped!
 class EditDialog(AutoSyncBase):
     def __init__(self):
-        AutoSyncBase.__init__(self, 'UI/EditDialog.xaml')
+        AutoSyncBase.__init__(self, 'UI/AutoSync.xaml')  # Same XAML as base
         # IntelliSense still works through inheritance!
         self.save_button.Click += self.on_save
 ```
 
 **Why this works:** The IDE follows the inheritance chain. `EditDialog` → `AutoSyncBase` → `_XAMLBase` → stub class. IntelliSense flows down through the chain.
 
-### Pattern 3: Custom Inheritance
+### Pattern 3: Base Class Has _XAMLBase, Child Loads DIFFERENT XAML
+
+This is a common pattern when you have multiple dialogs that share a base class but each loads its own XAML file:
+
+```python
+# lib/AutoSyncBase.py - Base class with _XAMLBase from MainWindow.xaml
+if TYPE_CHECKING:
+  from _MainWindow_xaml import MainWindowElements as _XAMLBase
+else:
+  _XAMLBase = forms.WPFWindow
+
+class AutoSyncBase(_XAMLBase):
+    """Shared base class for all AutoSync dialogs."""
+    xaml_content = "./UI/MainWindow.xaml"  # Default XAML
+
+    def loadXAML(self, xaml_path):
+        self.load_xaml(xaml_path)
+        setup_element_groups(self)
+    ...
+```
+
+```python
+# analyze_dialog.py - Child class that loads DIFFERENT XAML
+from AutoSyncBase import AutoSyncBase
+
+class AnalyzeDialog(AutoSyncBase):
+    xaml_content = "./UI/Analyze.xaml"  # DIFFERENT XAML!
+
+    def __init__(self):
+        super(AnalyzeDialog, self).__init__()
+        self.loadXAML(AnalyzeDialog.xaml_content)
+```
+
+**The Problem:** `AnalyzeDialog` loads `Analyze.xaml` but would inherit `MainWindowElements` type hints from the base class. IntelliSense would show wrong elements!
+
+**The Solution:** The extension automatically detects this and injects **child-specific** TYPE_CHECKING:
+
+```python
+# analyze_dialog.py - AFTER auto-transformation
+from AutoSyncBase import AutoSyncBase
+
+# IronPython doesn't have typing module, so we handle it gracefully
+try:
+  from typing import TYPE_CHECKING
+except ImportError:
+  TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+  from _Analyze_xaml import AnalyzeElements as _AnalyzeXAMLBase
+else:
+  _AnalyzeXAMLBase = AutoSyncBase  # Actual parent at runtime
+
+class AnalyzeDialog(_AnalyzeXAMLBase):  # Now gets Analyze.xaml elements!
+    xaml_content = "./UI/Analyze.xaml"
+
+    def __init__(self):
+        super(AnalyzeDialog, self).__init__()
+        self.loadXAML(AnalyzeDialog.xaml_content)
+        # IntelliSense now shows elements from Analyze.xaml!
+        self.Button.refresh_button.IsEnabled = True
+```
+
+**Key points:**
+- Uses **unique naming**: `_AnalyzeXAMLBase` instead of `_XAMLBase` to avoid conflicts
+- At **runtime**: inherits from `AutoSyncBase` (actual parent class)
+- At **type-check time**: inherits from `AnalyzeElements` (correct XAML elements)
+- Does **not** add `setup_element_groups(self)` since the parent class handles it
+
+### Pattern 4: Custom Inheritance
 
 If your class inherits from something other than WPFWindow (and that class doesn't have `_XAMLBase`), the extension adds `_XAMLBase` to the inheritance:
 
@@ -771,15 +840,21 @@ The extension checks if a parent class has `_XAMLBase` by:
 
 1. **Same file:** Checks if the parent class is defined in the same file with `_XAMLBase` in its inheritance
 2. **Imported class:** Finds the import statement, locates the source file (checking `lib/` folders), and scans for `_XAMLBase`
+3. **XAML comparison:** If parent has `_XAMLBase`, extracts which XAML file it uses (from the import statement `from _XXX_xaml import ...`) and compares with the child's XAML
+
+**How it detects which XAML a class loads:**
+- Parses `self.load_xaml("path/to/File.xaml")` or `self.loadXAML("...")` calls
+- Checks class attributes like `xaml_content = "./UI/File.xaml"` when used with `self.loadXAML(ClassName.xaml_content)`
 
 ```
 my-tools.extension/
 ├── lib/
-│   └── AutoSyncBase.py    ← Extension checks here for _XAMLBase
+│   └── AutoSyncBase.py    ← Extension checks here for _XAMLBase and which XAML it uses
 └── MyTool.tab/
     └── MyPanel.panel/
         └── MyButton.pushbutton/
-            └── edit_dialog.py  ← Inherits from AutoSyncBase
+            └── analyze_dialog.py  ← Inherits from AutoSyncBase, loads Analyze.xaml
+                                      Extension detects different XAML and injects child-specific TYPE_CHECKING
 ```
 
 ## Best Practices
@@ -906,6 +981,14 @@ MIT
 Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/dolanklock/xaml-python-intellisense).
 
 ## Changelog
+
+### v0.8.0
+- **Child class XAML detection** - Extension now detects when a child class loads a DIFFERENT XAML file than its parent
+- Automatically injects child-specific TYPE_CHECKING with unique naming (e.g., `_AnalyzeXAMLBase`)
+- Parses `load_xaml()`, `loadXAML()` calls and class attributes like `xaml_content` to detect which XAML each class uses
+- Child classes get correct IntelliSense for their own XAML elements, not inherited from parent
+- At runtime, still inherits from actual parent class (e.g., `AutoSyncBase`)
+- Added "Pattern 3: Base Class Has _XAMLBase, Child Loads DIFFERENT XAML" to documentation
 
 ### v0.7.0
 - **Smart inheritance detection** - Extension now intelligently handles different inheritance patterns

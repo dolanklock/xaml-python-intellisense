@@ -14,17 +14,25 @@ export function activate(context: vscode.ExtensionContext) {
   // Watch for XAML file changes
   const xamlWatcher = vscode.workspace.createFileSystemWatcher('**/*.xaml');
 
-  xamlWatcher.onDidChange(uri => {
-    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+  xamlWatcher.onDidChange(async uri => {
+    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', uri);
     if (config.get<boolean>('autoGenerate', true)) {
-      generateStubsForXaml(uri);
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (folder) {
+        await ensureStubsFolderConfigured(folder);
+      }
+      await generateStubsForXaml(uri);
     }
   });
 
-  xamlWatcher.onDidCreate(uri => {
-    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+  xamlWatcher.onDidCreate(async uri => {
+    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', uri);
     if (config.get<boolean>('autoGenerate', true)) {
-      generateStubsForXaml(uri);
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (folder) {
+        await ensureStubsFolderConfigured(folder);
+      }
+      await generateStubsForXaml(uri);
     }
   });
 
@@ -38,13 +46,16 @@ export function activate(context: vscode.ExtensionContext) {
   const generateAllCommand = vscode.commands.registerCommand(
     'xaml-intellisense.generateStubs',
     async () => {
-      const xamlFiles = await vscode.workspace.findFiles('**/*.xaml');
       let generated = 0;
       let pyModified = 0;
 
-      // Ensure stubs folder and VS Code settings are configured
-      await ensureStubsFolderConfigured();
+      // Ensure each workspace folder is set up
+      const folders = vscode.workspace.workspaceFolders || [];
+      for (const folder of folders) {
+        await ensureStubsFolderConfigured(folder);
+      }
 
+      const xamlFiles = await vscode.workspace.findFiles('**/*.xaml');
       for (const file of xamlFiles) {
         const result = await generateStubsForXaml(file);
         generated += result.stubs;
@@ -73,8 +84,11 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Ensure stubs folder and VS Code settings are configured
-      await ensureStubsFolderConfigured();
+      // Ensure stubs folder and VS Code settings are configured for this file's workspace folder
+      const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+      if (folder) {
+        await ensureStubsFolderConfigured(folder);
+      }
 
       const result = await generateStubsForXaml(editor.document.uri);
       if (result.stubs > 0) {
@@ -87,12 +101,17 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Command to configure VS Code settings for stub path
+  // Command to configure VS Code settings for stub path (all workspace folders)
   const configureSettingsCommand = vscode.commands.registerCommand(
     'xaml-intellisense.configureSettings',
     async () => {
-      await ensureStubsFolderConfigured(true);
-      vscode.window.showInformationMessage('XAML IntelliSense: VS Code settings configured');
+      const folders = vscode.workspace.workspaceFolders || [];
+      for (const folder of folders) {
+        await ensureStubsFolderConfigured(folder, true);
+      }
+      vscode.window.showInformationMessage(
+        `XAML IntelliSense: Configured ${folders.length} workspace folder(s)`
+      );
     }
   );
 
@@ -105,15 +124,10 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 /**
- * Get the stubs folder path (creates it if needed)
+ * Get the stubs folder path for a given workspace folder (creates it if needed)
  */
-function getStubsFolderPath(): string | null {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-  if (!workspaceFolder) {
-    return null;
-  }
-
-  const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+function getStubsFolderPath(workspaceFolder: vscode.WorkspaceFolder): string {
+  const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', workspaceFolder.uri);
   const stubsFolderName = config.get<string>('stubsFolder', 'typings');
 
   const stubsPath = path.join(workspaceFolder.uri.fsPath, stubsFolderName);
@@ -121,22 +135,17 @@ function getStubsFolderPath(): string | null {
   // Create folder if it doesn't exist
   if (!fs.existsSync(stubsPath)) {
     fs.mkdirSync(stubsPath, { recursive: true });
-    outputChannel.appendLine(`Created stubs folder: ${stubsFolderName}/`);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Created stubs folder: ${stubsFolderName}/`);
   }
 
   return stubsPath;
 }
 
 /**
- * Ensure VS Code settings are configured for stub path
+ * Ensure VS Code settings are configured for stub path in a given workspace folder
  */
-async function ensureStubsFolderConfigured(force: boolean = false): Promise<void> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-  if (!workspaceFolder) {
-    return;
-  }
-
-  const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+async function ensureStubsFolderConfigured(workspaceFolder: vscode.WorkspaceFolder, force: boolean = false): Promise<void> {
+  const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', workspaceFolder.uri);
   const stubsFolderName = config.get<string>('stubsFolder', 'typings');
   const autoConfigureSettings = config.get<boolean>('autoConfigureSettings', true);
 
@@ -145,53 +154,49 @@ async function ensureStubsFolderConfigured(force: boolean = false): Promise<void
   }
 
   // Create stubs folder
-  const stubsPath = getStubsFolderPath();
-  if (!stubsPath) {
-    return;
-  }
+  const stubsPath = getStubsFolderPath(workspaceFolder);
 
-  // Check current Python analysis settings
-  const pythonAnalysisConfig = vscode.workspace.getConfiguration('python.analysis');
+  // Use the folder URI as the scope so multi-root settings land in the right folder
+  const pythonAnalysisConfig = vscode.workspace.getConfiguration('python.analysis', workspaceFolder.uri);
   const currentStubPath = pythonAnalysisConfig.get<string>('stubPath');
   const currentAnalysisExtraPaths = pythonAnalysisConfig.get<string[]>('extraPaths') || [];
 
-  // Check current Python autoComplete settings
-  const pythonConfig = vscode.workspace.getConfiguration('python');
+  const pythonConfig = vscode.workspace.getConfiguration('python', workspaceFolder.uri);
   const currentAutoCompleteExtraPaths = pythonConfig.get<string[]>('autoComplete.extraPaths') || [];
 
   // Update stubPath if not set or different
   if (currentStubPath !== `./${stubsFolderName}` || force) {
-    await pythonAnalysisConfig.update('stubPath', `./${stubsFolderName}`, vscode.ConfigurationTarget.Workspace);
-    outputChannel.appendLine(`Configured python.analysis.stubPath = "./${stubsFolderName}"`);
+    await pythonAnalysisConfig.update('stubPath', `./${stubsFolderName}`, vscode.ConfigurationTarget.WorkspaceFolder);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Configured python.analysis.stubPath = "./${stubsFolderName}"`);
   }
 
   // Add stubs folder to python.analysis.extraPaths if not present
   const stubsExtraPath = `\${workspaceFolder}/${stubsFolderName}`;
   if (!currentAnalysisExtraPaths.includes(stubsExtraPath)) {
     const newExtraPaths = [...currentAnalysisExtraPaths, stubsExtraPath];
-    await pythonAnalysisConfig.update('extraPaths', newExtraPaths, vscode.ConfigurationTarget.Workspace);
-    outputChannel.appendLine(`Added "${stubsExtraPath}" to python.analysis.extraPaths`);
+    await pythonAnalysisConfig.update('extraPaths', newExtraPaths, vscode.ConfigurationTarget.WorkspaceFolder);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Added "${stubsExtraPath}" to python.analysis.extraPaths`);
   }
 
   // Add stubs folder to python.autoComplete.extraPaths if not present
   if (!currentAutoCompleteExtraPaths.includes(stubsExtraPath)) {
     const newAutoCompletePaths = [...currentAutoCompleteExtraPaths, stubsExtraPath];
-    await pythonConfig.update('autoComplete.extraPaths', newAutoCompletePaths, vscode.ConfigurationTarget.Workspace);
-    outputChannel.appendLine(`Added "${stubsExtraPath}" to python.autoComplete.extraPaths`);
+    await pythonConfig.update('autoComplete.extraPaths', newAutoCompletePaths, vscode.ConfigurationTarget.WorkspaceFolder);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Added "${stubsExtraPath}" to python.autoComplete.extraPaths`);
   }
 
   // Create __init__.py for stubs folder to make it a proper Python package
   const initPyPath = path.join(stubsPath, '__init__.py');
   if (!fs.existsSync(initPyPath)) {
     fs.writeFileSync(initPyPath, '# Auto-generated typings for XAML Python IntelliSense\n', 'utf-8');
-    outputChannel.appendLine(`Created ${stubsFolderName}/__init__.py`);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Created ${stubsFolderName}/__init__.py`);
   }
 
   // Create .gitignore for stubs folder if it doesn't exist
   const gitignorePath = path.join(stubsPath, '.gitignore');
   if (!fs.existsSync(gitignorePath)) {
     fs.writeFileSync(gitignorePath, '# Auto-generated stub files\n*.py\n!__init__.py\n!wpf_helpers.py\n', 'utf-8');
-    outputChannel.appendLine(`Created ${stubsFolderName}/.gitignore`);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Created ${stubsFolderName}/.gitignore`);
   }
 
   // Copy wpf_helpers.py to stubs folder for IDE type checking
@@ -199,22 +204,17 @@ async function ensureStubsFolderConfigured(force: boolean = false): Promise<void
   if (!fs.existsSync(wpfHelpersPath) || force) {
     const wpfHelpersContent = getWpfHelpersContent();
     fs.writeFileSync(wpfHelpersPath, wpfHelpersContent, 'utf-8');
-    outputChannel.appendLine(`Created ${stubsFolderName}/wpf_helpers.py`);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Created ${stubsFolderName}/wpf_helpers.py`);
   }
 
   // Copy wpf_helpers.py to pyRevit extension lib folders for runtime support
-  await ensurePyRevitLibSetup(force);
+  await ensurePyRevitLibSetup(workspaceFolder, force);
 }
 
 /**
- * Find all pyRevit extension folders in the workspace and set up lib/wpf_helpers.py
+ * Find all pyRevit extension folders in the given workspace folder and set up lib/wpf_helpers.py
  */
-async function ensurePyRevitLibSetup(force: boolean = false): Promise<void> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-  if (!workspaceFolder) {
-    return;
-  }
-
+async function ensurePyRevitLibSetup(workspaceFolder: vscode.WorkspaceFolder, force: boolean = false): Promise<void> {
   const workspacePath = workspaceFolder.uri.fsPath;
   const extensionFolders = findPyRevitExtensions(workspacePath);
 
@@ -225,14 +225,14 @@ async function ensurePyRevitLibSetup(force: boolean = false): Promise<void> {
     // Create lib folder if it doesn't exist
     if (!fs.existsSync(libPath)) {
       fs.mkdirSync(libPath, { recursive: true });
-      outputChannel.appendLine(`Created pyRevit lib folder: ${path.relative(workspacePath, libPath)}`);
+      outputChannel.appendLine(`[${workspaceFolder.name}] Created pyRevit lib folder: ${path.relative(workspacePath, libPath)}`);
     }
 
     // Copy wpf_helpers.py to lib folder for runtime imports
     if (!fs.existsSync(wpfHelpersLibPath) || force) {
       const wpfHelpersContent = getWpfHelpersContent();
       fs.writeFileSync(wpfHelpersLibPath, wpfHelpersContent, 'utf-8');
-      outputChannel.appendLine(`Created ${path.relative(workspacePath, wpfHelpersLibPath)}`);
+      outputChannel.appendLine(`[${workspaceFolder.name}] Created ${path.relative(workspacePath, wpfHelpersLibPath)}`);
     }
   }
 }
@@ -429,8 +429,11 @@ async function generateAllStubsOnStartup(): Promise<void> {
     return;
   }
 
-  // Ensure stubs folder and settings are configured
-  await ensureStubsFolderConfigured();
+  // Ensure each workspace folder is configured
+  const folders = vscode.workspace.workspaceFolders || [];
+  for (const folder of folders) {
+    await ensureStubsFolderConfigured(folder);
+  }
 
   const xamlFiles = await vscode.workspace.findFiles('**/*.xaml');
   let totalStubs = 0;
@@ -443,7 +446,7 @@ async function generateAllStubsOnStartup(): Promise<void> {
   }
 
   if (totalStubs > 0) {
-    outputChannel.appendLine(`Startup: Generated ${totalStubs} stub files, updated ${totalPyFiles} Python files`);
+    outputChannel.appendLine(`Startup: Generated ${totalStubs} stub files, updated ${totalPyFiles} Python files across ${folders.length} workspace folder(s)`);
   }
 }
 
@@ -500,26 +503,30 @@ async function generateStubsForXaml(xamlUri: vscode.Uri, silent: boolean = false
     const xamlPath = xamlUri.fsPath;
     const baseName = path.basename(xamlPath, '.xaml');
 
+    // Determine the workspace folder this XAML belongs to
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(xamlUri);
+    if (!workspaceFolder) {
+      outputChannel.appendLine(`No workspace folder found for ${xamlPath} - cannot generate stubs`);
+      return result;
+    }
+
     // Parse XAML
     const elements = await parseXaml(xamlPath);
 
     if (elements.length === 0) {
-      outputChannel.appendLine(`Skipped ${baseName}.xaml - no named elements`);
+      outputChannel.appendLine(`[${workspaceFolder.name}] Skipped ${baseName}.xaml - no named elements`);
       return result;
     }
 
-    // Get configuration
-    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+    // Get configuration scoped to this workspace folder
+    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', workspaceFolder.uri);
     const prefix = config.get<string>('stubFilePrefix', '_');
     const suffix = config.get<string>('stubFileSuffix', '_xaml');
+    const stubsFolderName = config.get<string>('stubsFolder', 'typings');
     const autoInject = config.get<boolean>('autoInjectAnnotations', true);
 
-    // Get stubs folder path
-    const stubsFolder = getStubsFolderPath();
-    if (!stubsFolder) {
-      outputChannel.appendLine('No workspace folder found - cannot generate stubs');
-      return result;
-    }
+    // Get stubs folder path for this folder
+    const stubsFolder = getStubsFolderPath(workspaceFolder);
 
     // Generate the XAML-named stub file
     const stubClassName = baseName
@@ -533,7 +540,7 @@ async function generateStubsForXaml(xamlUri: vscode.Uri, silent: boolean = false
     const stubPath = path.join(stubsFolder, stubFileName);
 
     fs.writeFileSync(stubPath, stubContent, 'utf-8');
-    outputChannel.appendLine(`Generated stub: typings/${stubFileName} (${elements.length} elements)`);
+    outputChannel.appendLine(`[${workspaceFolder.name}] Generated stub: ${stubsFolderName}/${stubFileName} (${elements.length} elements)`);
     result.stubs++;
 
     // Find Python files that use this XAML and inject type annotations
@@ -565,14 +572,16 @@ function deleteStubsForXaml(xamlUri: vscode.Uri): void {
   try {
     const baseName = path.basename(xamlUri.fsPath, '.xaml');
 
-    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense');
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(xamlUri);
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration('xamlPythonIntellisense', workspaceFolder.uri);
     const prefix = config.get<string>('stubFilePrefix', '_');
     const suffix = config.get<string>('stubFileSuffix', '_xaml');
 
-    const stubsFolder = getStubsFolderPath();
-    if (!stubsFolder) {
-      return;
-    }
+    const stubsFolder = getStubsFolderPath(workspaceFolder);
 
     // Delete both .py and .pyi files (for backwards compatibility)
     const stubFileNamePy = `${prefix}${baseName}${suffix}.py`;
